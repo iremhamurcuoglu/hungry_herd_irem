@@ -1,7 +1,7 @@
 """
 Sound Manager for Feed the Herd
-Generates all sounds programmatically using pure Python - no numpy needed.
-Works on desktop AND web (pygbag/emscripten).
+Pure Python sound generation - works on desktop AND web (pygbag/emscripten).
+Lazy generation: sounds are created on first use to avoid blocking init.
 """
 
 import pygame
@@ -12,167 +12,185 @@ import io
 import sys
 import random
 
-SAMPLE_RATE = 22050  # Lower rate for web compatibility
+IS_WEB = sys.platform == "emscripten"
+SAMPLE_RATE = 8000 if IS_WEB else 22050
+
+# Note frequencies
+C4=261.63; D4=293.66; E4=329.63; F4=349.23
+G4=392.00; A4=440.00; B4=493.88
+C5=523.25; D5=587.33; E5=659.25; F5=698.46
+G5=783.99; A5=880.00
 
 
-def _make_sound_from_samples(samples):
-    """Convert a list of int16 sample values into a pygame.mixer.Sound via WAV in memory."""
-    # Use array module instead of struct.pack(*samples) to avoid arg limit on web
+def _make_wav(samples):
+    """Build a WAV from int16 sample list, return pygame.mixer.Sound."""
     arr = array.array('h', samples)
     raw = arr.tobytes()
     n = len(samples)
     buf = io.BytesIO()
-    data_size = n * 2
+    ds = n * 2
     buf.write(b'RIFF')
-    buf.write(struct.pack('<I', 36 + data_size))
+    buf.write(struct.pack('<I', 36 + ds))
     buf.write(b'WAVE')
     buf.write(b'fmt ')
-    buf.write(struct.pack('<I', 16))
-    buf.write(struct.pack('<H', 1))
-    buf.write(struct.pack('<H', 1))
-    buf.write(struct.pack('<I', SAMPLE_RATE))
-    buf.write(struct.pack('<I', SAMPLE_RATE * 2))
-    buf.write(struct.pack('<H', 2))
-    buf.write(struct.pack('<H', 16))
+    buf.write(struct.pack('<IHHIIHH', 16, 1, 1, SAMPLE_RATE, SAMPLE_RATE * 2, 2, 16))
     buf.write(b'data')
-    buf.write(struct.pack('<I', data_size))
+    buf.write(struct.pack('<I', ds))
     buf.write(raw)
     buf.seek(0)
     return pygame.mixer.Sound(buf)
 
 
-def _generate_melody(notes, note_duration=0.15, volume=0.25, wave_type="sine"):
-    """Generate a melody from a list of (frequency, duration_multiplier) tuples."""
-    all_samples = []
-    two_pi = 2.0 * math.pi
+def _tone(freq, dur, vol=0.3):
+    """Generate a simple sine tone."""
+    n = int(SAMPLE_RATE * dur)
+    tp = 2.0 * math.pi * freq / SAMPLE_RATE
+    v = int(vol * 32767)
+    out = []
+    for i in range(n):
+        s = math.sin(tp * i)
+        # fade in/out
+        if i < 200:
+            s *= i / 200.0
+        elif i > n - 200:
+            s *= (n - i) / 200.0
+        out.append(max(-32767, min(32767, int(s * v))))
+    return _make_wav(out)
 
-    for freq, dur_mult in notes:
-        dur = note_duration * dur_mult
-        n_samples = int(SAMPLE_RATE * dur)
 
+def _melody(notes, nd=0.15, vol=0.25):
+    """Melody from [(freq, dur_mult), ...] tuples."""
+    out = []
+    tp_base = 2.0 * math.pi / SAMPLE_RATE
+    v = int(vol * 32767)
+    for freq, dm in notes:
+        n = int(SAMPLE_RATE * nd * dm)
         if freq == 0:
-            all_samples.extend([0] * n_samples)
+            out.extend([0] * n)
         else:
-            attack = min(int(n_samples * 0.05), 500)
-            decay = int(n_samples * 0.4)
-            for i in range(n_samples):
-                t = i / SAMPLE_RATE
-                if wave_type == "sine":
-                    val = math.sin(two_pi * freq * t)
-                elif wave_type == "square":
-                    val = 1.0 if math.sin(two_pi * freq * t) >= 0 else -1.0
-                elif wave_type == "triangle":
-                    phase = (t * freq) % 1.0
-                    val = 4.0 * abs(phase - 0.5) - 1.0
-                elif wave_type == "sawtooth":
-                    phase = (t * freq) % 1.0
-                    val = 2.0 * phase - 1.0
-                else:
-                    val = math.sin(two_pi * freq * t)
-                if attack > 0 and i < attack:
-                    val *= i / attack
-                if decay > 0 and i >= n_samples - decay:
-                    val *= (n_samples - i) / decay
-                all_samples.append(max(-32767, min(32767, int(val * volume * 32767))))
-
-    return _make_sound_from_samples(all_samples)
+            tp = tp_base * freq
+            decay_start = int(n * 0.6)
+            for i in range(n):
+                s = math.sin(tp * i)
+                if i < 80:
+                    s *= i / 80.0
+                if i >= decay_start:
+                    s *= (n - i) / (n - decay_start)
+                out.append(max(-32767, min(32767, int(s * v))))
+    return _make_wav(out)
 
 
-def _generate_noise_burst(duration=0.1, volume=0.15):
-    """Short noise burst for earthy/dirty sounds."""
-    n_samples = int(SAMPLE_RATE * duration)
-    samples = []
-    for i in range(n_samples):
-        noise = random.uniform(-1, 1)
-        env = (1.0 - i / n_samples) ** 2
-        samples.append(max(-32767, min(32767, int(noise * env * volume * 32767))))
-    return _make_sound_from_samples(samples)
+def _noise(dur=0.1, vol=0.15):
+    """Noise burst."""
+    n = int(SAMPLE_RATE * dur)
+    v = int(vol * 32767)
+    out = []
+    for i in range(n):
+        env = (1.0 - i / n) ** 2
+        out.append(max(-32767, min(32767, int(random.uniform(-1, 1) * env * v))))
+    return _make_wav(out)
 
 
-# Note frequencies
-C4 = 261.63; D4 = 293.66; E4 = 329.63; F4 = 349.23
-G4 = 392.00; A4 = 440.00; B4 = 493.88
-C5 = 523.25; D5 = 587.33; E5 = 659.25; F5 = 698.46
-G5 = 783.99; A5 = 880.00
+# Sound effect definitions (lazy - generated on first access)
+_SOUND_DEFS = {
+    "plant":          lambda: _melody([(C5,.6),(E5,.6),(G5,1)], nd=.08, vol=.25),
+    "harvest_carrot": lambda: _melody([(E5,.5),(G5,.5),(C5,1.2)], nd=.07, vol=.3),
+    "harvest_apple":  lambda: _melody([(G4,.8),(C5,.5),(E5,1)], nd=.09, vol=.3),
+    "feed":           lambda: _melody([(C5,.5),(D5,.5),(E5,.5),(G5,1.5)], nd=.08, vol=.3),
+    "horse_done":     lambda: _melody([(C5,.7),(E5,.7),(G5,.7),(C5*2,2)], nd=.12, vol=.35),
+    "poop_spawn":     lambda: _tone(G4*0.5, 0.2, 0.15),
+    "poop_collect":   lambda: _noise(dur=.12, vol=.18),
+    "coin":           lambda: _melody([(E5,.4),(A5,1.5)], nd=.06, vol=.3),
+    "buy":            lambda: _melody([(A4,.5),(C5,.5),(E5,.5),(A5,1)], nd=.06, vol=.25),
+    "shop_open":      lambda: _melody([(C5,.8),(G5,1.2)], nd=.1, vol=.2),
+    "shop_close":     lambda: _melody([(G5,.8),(C5,1.2)], nd=.1, vol=.2),
+    "trash":          lambda: _tone(200, 0.15, 0.2),
+    "level_up":       lambda: _melody([(C5,1),(E5,1),(G5,1),(0,.5),(C5,.8),(E5,.8),(G5,.8),(C5*2,3)], nd=.12, vol=.35),
+    "step":           lambda: _noise(dur=.03, vol=.04),
+}
+
+# Shorter music for web
+_MUSIC_NOTES = [
+    (C4,2),(E4,1),(G4,1),(E4,2),(C4,2),
+    (D4,2),(F4,1),(A4,1),(G4,2),(E4,2),
+    (C4,2),(D4,1),(E4,1),(C4,4),
+    (0,2),
+]
 
 
 class SoundManager:
     def __init__(self):
         self.enabled = False
         self.music_playing = False
-        self.sounds = {}
+        self._sounds = {}
         self._bg_channel = None
         self._bg_sound = None
-        self._bg_volume = 0.15
+        self._bg_volume = 0.20
+        self._initialized = False
 
         try:
-            # Re-init mixer at our sample rate for consistent WAV playback
-            if pygame.mixer.get_init():
-                pygame.mixer.quit()
-            pygame.mixer.init(frequency=SAMPLE_RATE, size=-16, channels=1, buffer=1024)
-            pygame.mixer.set_num_channels(16)
-            self.enabled = True
-        except Exception as e:
-            print(f"SoundManager mixer init warning: {e}")
-            self.enabled = False
-            return
-
-        try:
-            self._generate_all_sounds()
-        except Exception as e:
-            print(f"SoundManager sound gen warning: {e}")
-
-        try:
+            # Don't quit existing mixer - just use whatever pygame.init() set up
+            if not pygame.mixer.get_init():
+                pygame.mixer.init(frequency=SAMPLE_RATE, size=-16, channels=1, buffer=1024)
+            pygame.mixer.set_num_channels(8)
             self._bg_channel = pygame.mixer.Channel(0)
-            self._bg_sound = self._generate_background_music()
+            self.enabled = True
+            self._initialized = True
+            print(f"SoundManager OK: mixer={pygame.mixer.get_init()}")
         except Exception as e:
-            print(f"SoundManager music gen warning: {e}")
+            print(f"SoundManager init warning: {e}")
+            self.enabled = False
 
-    def _generate_all_sounds(self):
-        self.sounds["plant"] = _generate_melody([(C5, 0.6), (E5, 0.6), (G5, 1.0)], note_duration=0.08, volume=0.25)
-        self.sounds["harvest_carrot"] = _generate_melody([(E5, 0.5), (G5, 0.5), (C5, 1.2)], note_duration=0.07, volume=0.3)
-        self.sounds["harvest_apple"] = _generate_melody([(G4, 0.8), (C5, 0.5), (E5, 1.0)], note_duration=0.09, volume=0.3)
-        self.sounds["feed"] = _generate_melody([(C5, 0.5), (D5, 0.5), (E5, 0.5), (G5, 1.5)], note_duration=0.08, volume=0.3)
-        self.sounds["horse_done"] = _generate_melody([(C5, 0.7), (E5, 0.7), (G5, 0.7), (C5*2, 2.0)], note_duration=0.12, volume=0.35)
-        self.sounds["poop_spawn"] = _generate_melody([(G4*0.5, 0.8), (E4*0.4, 1.5)], note_duration=0.12, volume=0.2, wave_type="sawtooth")
-        self.sounds["poop_collect"] = _generate_noise_burst(duration=0.15, volume=0.2)
-        self.sounds["coin"] = _generate_melody([(E5, 0.4), (A5, 1.5)], note_duration=0.06, volume=0.3)
-        self.sounds["buy"] = _generate_melody([(A4, 0.5), (C5, 0.5), (E5, 0.5), (A5, 1.0)], note_duration=0.06, volume=0.25)
-        self.sounds["shop_open"] = _generate_melody([(C5, 0.8), (G5, 1.2)], note_duration=0.1, volume=0.2)
-        self.sounds["shop_close"] = _generate_melody([(G5, 0.8), (C5, 1.2)], note_duration=0.1, volume=0.2)
-        self.sounds["trash"] = _generate_melody([(A4, 0.6), (F4, 0.6), (C4, 1.2)], note_duration=0.06, volume=0.2, wave_type="sawtooth")
-        self.sounds["level_up"] = _generate_melody([(C5, 1), (E5, 1), (G5, 1), (0, 0.5), (C5, 0.8), (E5, 0.8), (G5, 0.8), (C5*2, 3)], note_duration=0.15, volume=0.4)
-        self.sounds["step"] = _generate_noise_burst(duration=0.04, volume=0.05)
+    def _get_sound(self, name):
+        """Lazy-generate a sound on first use."""
+        if name not in self._sounds:
+            gen = _SOUND_DEFS.get(name)
+            if gen:
+                try:
+                    self._sounds[name] = gen()
+                except Exception as e:
+                    print(f"Sound gen error ({name}): {e}")
+                    self._sounds[name] = None
+            else:
+                self._sounds[name] = None
+        return self._sounds[name]
 
-    def _generate_background_music(self):
-        melody_notes = [
-            (C4, 2), (E4, 1), (G4, 1), (E4, 2), (C4, 2),
-            (D4, 2), (F4, 1), (A4, 1), (G4, 2), (E4, 2),
-            (G4, 2), (A4, 1), (G4, 1), (E4, 2), (D4, 2),
-            (C4, 2), (D4, 1), (E4, 1), (C4, 4),
-            (E4, 2), (G4, 1), (A4, 1), (G4, 2), (E4, 2),
-            (F4, 2), (E4, 1), (D4, 1), (C4, 4),
-            (0, 4),
-        ]
-        return _generate_melody(melody_notes, note_duration=0.22, volume=0.12)
+    def _ensure_music(self):
+        """Lazy-generate background music."""
+        if self._bg_sound is None:
+            try:
+                self._bg_sound = _melody(_MUSIC_NOTES, nd=0.2, vol=0.10)
+            except Exception as e:
+                print(f"Music gen error: {e}")
 
     def play(self, sound_name):
         if not self.enabled:
             return
-        snd = self.sounds.get(sound_name)
-        if snd:
-            snd.play()
+        try:
+            snd = self._get_sound(sound_name)
+            if snd:
+                snd.play()
+        except Exception:
+            pass
 
     def start_music(self):
         if not self.enabled or not self._bg_channel:
             return
-        self._bg_channel.play(self._bg_sound, loops=-1)
-        self._bg_channel.set_volume(self._bg_volume)
-        self.music_playing = True
+        try:
+            self._ensure_music()
+            if self._bg_sound:
+                self._bg_channel.play(self._bg_sound, loops=-1)
+                self._bg_channel.set_volume(self._bg_volume)
+                self.music_playing = True
+        except Exception as e:
+            print(f"Music play error: {e}")
 
     def stop_music(self):
-        if self._bg_channel:
-            self._bg_channel.stop()
+        try:
+            if self._bg_channel:
+                self._bg_channel.stop()
+        except Exception:
+            pass
         self.music_playing = False
 
     def toggle_music(self):
@@ -184,7 +202,10 @@ class SoundManager:
     def toggle_sfx(self):
         self.enabled = not self.enabled
 
-    def set_music_volume(self, vol: float):
+    def set_music_volume(self, vol):
         self._bg_volume = max(0.0, min(1.0, vol))
-        if self._bg_channel:
-            self._bg_channel.set_volume(self._bg_volume)
+        try:
+            if self._bg_channel:
+                self._bg_channel.set_volume(self._bg_volume)
+        except Exception:
+            pass
