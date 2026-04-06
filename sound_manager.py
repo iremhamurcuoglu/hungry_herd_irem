@@ -1,20 +1,16 @@
 """
 Sound Manager for Feed the Herd
 Pure Python sound generation - works on desktop AND web (pygbag/emscripten).
-Web audio fix: file-based loading + audio unlock on first user gesture.
+Uses raw PCM buffer= for maximum compatibility.
 """
 
 import pygame
 import math
-import struct
 import array
-import io
 import sys
-import os
 import random
 
 IS_WEB = sys.platform == "emscripten"
-SAMPLE_RATE = 22050
 
 # Note frequencies
 C4=261.63; D4=293.66; E4=329.63; F4=349.23
@@ -22,63 +18,38 @@ G4=392.00; A4=440.00; B4=493.88
 C5=523.25; D5=587.33; E5=659.25; F5=698.46
 G5=783.99; A5=880.00
 
-
-def _make_wav_bytes(samples):
-    """Build WAV bytes from int16 sample list."""
-    arr = array.array('h', samples)
-    raw = arr.tobytes()
-    n = len(samples)
-    ds = n * 2
-    buf = io.BytesIO()
-    buf.write(b'RIFF')
-    buf.write(struct.pack('<I', 36 + ds))
-    buf.write(b'WAVE')
-    buf.write(b'fmt ')
-    buf.write(struct.pack('<IHHIIHH', 16, 1, 1, SAMPLE_RATE, SAMPLE_RATE * 2, 2, 16))
-    buf.write(b'data')
-    buf.write(struct.pack('<I', ds))
-    buf.write(raw)
-    return buf.getvalue()
+# Will be set after mixer init
+_MIX_FREQ = 22050
+_MIX_CHANNELS = 2
 
 
-_snd_counter = 0
-
-def _make_sound(samples):
-    """Build a pygame Sound from int16 sample list.
-    Writes a real WAV file then loads it - most reliable on all platforms."""
-    global _snd_counter
-    _snd_counter += 1
-    wav_data = _make_wav_bytes(samples)
-    fname = f"_sfx_{_snd_counter}.wav"
+def _make_sound(mono_samples):
+    """Build pygame.mixer.Sound from mono int16 samples using raw PCM buffer.
+    Converts to mixer's channel count (stereo if needed)."""
+    if _MIX_CHANNELS == 2:
+        # Duplicate mono to stereo: L, R, L, R, ...
+        stereo = []
+        for s in mono_samples:
+            stereo.append(s)
+            stereo.append(s)
+        raw = array.array('h', stereo).tobytes()
+    else:
+        raw = array.array('h', mono_samples).tobytes()
     try:
-        with open(fname, "wb") as f:
-            f.write(wav_data)
-        snd = pygame.mixer.Sound(fname)
-        if not IS_WEB:
-            try:
-                os.remove(fname)
-            except Exception:
-                pass
-        return snd
+        return pygame.mixer.Sound(buffer=raw)
     except Exception as e:
-        print(f"Sound create error: {e}")
-        # Fallback: try BytesIO (works on desktop)
-        try:
-            return pygame.mixer.Sound(io.BytesIO(wav_data))
-        except Exception:
-            pass
-    return None
+        print(f"Sound buffer error: {e}")
+        return None
 
 
 def _tone(freq, dur, vol=0.3):
     """Generate a simple sine tone."""
-    n = int(SAMPLE_RATE * dur)
-    tp = 2.0 * math.pi * freq / SAMPLE_RATE
+    n = int(_MIX_FREQ * dur)
+    tp = 2.0 * math.pi * freq / _MIX_FREQ
     v = int(vol * 32767)
     out = []
     for i in range(n):
         s = math.sin(tp * i)
-        # fade in/out
         if i < 200:
             s *= i / 200.0
         elif i > n - 200:
@@ -90,10 +61,10 @@ def _tone(freq, dur, vol=0.3):
 def _melody(notes, nd=0.15, vol=0.25):
     """Melody from [(freq, dur_mult), ...] tuples."""
     out = []
-    tp_base = 2.0 * math.pi / SAMPLE_RATE
+    tp_base = 2.0 * math.pi / _MIX_FREQ
     v = int(vol * 32767)
     for freq, dm in notes:
-        n = int(SAMPLE_RATE * nd * dm)
+        n = int(_MIX_FREQ * nd * dm)
         if freq == 0:
             out.extend([0] * n)
         else:
@@ -111,7 +82,7 @@ def _melody(notes, nd=0.15, vol=0.25):
 
 def _noise(dur=0.1, vol=0.15):
     """Noise burst."""
-    n = int(SAMPLE_RATE * dur)
+    n = int(_MIX_FREQ * dur)
     v = int(vol * 32767)
     out = []
     for i in range(n):
@@ -138,7 +109,6 @@ _SOUND_DEFS = {
     "step":           lambda: _noise(dur=.03, vol=.04),
 }
 
-# Shorter music for web
 _MUSIC_NOTES = [
     (C4,2),(E4,1),(G4,1),(E4,2),(C4,2),
     (D4,2),(F4,1),(A4,1),(G4,2),(E4,2),
@@ -149,36 +119,41 @@ _MUSIC_NOTES = [
 
 class SoundManager:
     def __init__(self):
+        global _MIX_FREQ, _MIX_CHANNELS
         self.enabled = False
         self.music_playing = False
         self._sounds = {}
         self._bg_channel = None
         self._bg_sound = None
         self._bg_volume = 0.20
-        self._audio_unlocked = not IS_WEB  # Desktop: unlocked immediately
+        self._audio_unlocked = not IS_WEB
         self._pending_music = False
 
         try:
-            if not pygame.mixer.get_init():
-                pygame.mixer.init(frequency=SAMPLE_RATE, size=-16, channels=1, buffer=1024)
+            info = pygame.mixer.get_init()
+            if not info:
+                pygame.mixer.init()
+                info = pygame.mixer.get_init()
+            if info:
+                _MIX_FREQ = info[0]
+                _MIX_CHANNELS = info[2]
             pygame.mixer.set_num_channels(8)
             self._bg_channel = pygame.mixer.Channel(0)
             self.enabled = True
-            print(f"SoundManager OK: mixer={pygame.mixer.get_init()}")
+            print(f"SoundManager OK: mixer={info}, freq={_MIX_FREQ}, ch={_MIX_CHANNELS}")
         except Exception as e:
             print(f"SoundManager init warning: {e}")
             self.enabled = False
 
     def unlock_audio(self):
-        """Call on first user interaction (key/click) to unlock web AudioContext.
-        Browsers block audio until a user gesture occurs."""
+        """Call on first user interaction to unlock web AudioContext."""
         if self._audio_unlocked:
             return
         self._audio_unlocked = True
         print("Audio unlocked by user gesture")
         try:
-            silent = [0] * 1024
-            snd = _make_sound(silent)
+            # Play a tiny silent sound to activate AudioContext
+            snd = _make_sound([0] * 1024)
             if snd:
                 snd.play()
         except Exception as e:
