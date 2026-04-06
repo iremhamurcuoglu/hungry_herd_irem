@@ -44,11 +44,21 @@ def _make_wav_bytes(samples):
 _snd_counter = 0
 
 def _make_sound(samples):
-    """Build a pygame Sound from int16 sample list. Uses file on web."""
+    """Build a pygame Sound from int16 sample list."""
     global _snd_counter
     wav_data = _make_wav_bytes(samples)
+    try:
+        # Try buffer= keyword (works on most pygame builds including pygbag)
+        return pygame.mixer.Sound(buffer=wav_data)
+    except Exception:
+        pass
+    try:
+        # Fallback: BytesIO
+        return pygame.mixer.Sound(io.BytesIO(wav_data))
+    except Exception:
+        pass
     if IS_WEB:
-        # Emscripten: write to virtual filesystem, load, delete
+        # Last resort: write to virtual filesystem
         _snd_counter += 1
         fname = f"/tmp/_snd_{_snd_counter}.wav"
         try:
@@ -62,9 +72,7 @@ def _make_sound(samples):
             return snd
         except Exception as e:
             print(f"Web sound load error: {e}")
-            return None
-    else:
-        return pygame.mixer.Sound(io.BytesIO(wav_data))
+    return None
 
 
 def _tone(freq, dur, vol=0.3):
