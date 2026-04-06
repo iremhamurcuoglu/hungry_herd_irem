@@ -1,7 +1,7 @@
 """
 Sound Manager for Feed the Herd
 Pure Python sound generation - works on desktop AND web (pygbag/emscripten).
-Lazy generation: sounds are created on first use to avoid blocking init.
+Web audio fix: file-based loading + audio unlock on first user gesture.
 """
 
 import pygame
@@ -10,10 +10,11 @@ import struct
 import array
 import io
 import sys
+import os
 import random
 
 IS_WEB = sys.platform == "emscripten"
-SAMPLE_RATE = 8000 if IS_WEB else 22050
+SAMPLE_RATE = 22050
 
 # Note frequencies
 C4=261.63; D4=293.66; E4=329.63; F4=349.23
@@ -22,13 +23,13 @@ C5=523.25; D5=587.33; E5=659.25; F5=698.46
 G5=783.99; A5=880.00
 
 
-def _make_wav(samples):
-    """Build a WAV from int16 sample list, return pygame.mixer.Sound."""
+def _make_wav_bytes(samples):
+    """Build WAV bytes from int16 sample list."""
     arr = array.array('h', samples)
     raw = arr.tobytes()
     n = len(samples)
-    buf = io.BytesIO()
     ds = n * 2
+    buf = io.BytesIO()
     buf.write(b'RIFF')
     buf.write(struct.pack('<I', 36 + ds))
     buf.write(b'WAVE')
@@ -37,8 +38,33 @@ def _make_wav(samples):
     buf.write(b'data')
     buf.write(struct.pack('<I', ds))
     buf.write(raw)
-    buf.seek(0)
-    return pygame.mixer.Sound(buf)
+    return buf.getvalue()
+
+
+_snd_counter = 0
+
+def _make_sound(samples):
+    """Build a pygame Sound from int16 sample list. Uses file on web."""
+    global _snd_counter
+    wav_data = _make_wav_bytes(samples)
+    if IS_WEB:
+        # Emscripten: write to virtual filesystem, load, delete
+        _snd_counter += 1
+        fname = f"/tmp/_snd_{_snd_counter}.wav"
+        try:
+            with open(fname, "wb") as f:
+                f.write(wav_data)
+            snd = pygame.mixer.Sound(fname)
+            try:
+                os.remove(fname)
+            except Exception:
+                pass
+            return snd
+        except Exception as e:
+            print(f"Web sound load error: {e}")
+            return None
+    else:
+        return pygame.mixer.Sound(io.BytesIO(wav_data))
 
 
 def _tone(freq, dur, vol=0.3):
@@ -55,7 +81,7 @@ def _tone(freq, dur, vol=0.3):
         elif i > n - 200:
             s *= (n - i) / 200.0
         out.append(max(-32767, min(32767, int(s * v))))
-    return _make_wav(out)
+    return _make_sound(out)
 
 
 def _melody(notes, nd=0.15, vol=0.25):
@@ -77,7 +103,7 @@ def _melody(notes, nd=0.15, vol=0.25):
                 if i >= decay_start:
                     s *= (n - i) / (n - decay_start)
                 out.append(max(-32767, min(32767, int(s * v))))
-    return _make_wav(out)
+    return _make_sound(out)
 
 
 def _noise(dur=0.1, vol=0.15):
@@ -88,7 +114,7 @@ def _noise(dur=0.1, vol=0.15):
     for i in range(n):
         env = (1.0 - i / n) ** 2
         out.append(max(-32767, min(32767, int(random.uniform(-1, 1) * env * v))))
-    return _make_wav(out)
+    return _make_sound(out)
 
 
 # Sound effect definitions (lazy - generated on first access)
@@ -126,20 +152,37 @@ class SoundManager:
         self._bg_channel = None
         self._bg_sound = None
         self._bg_volume = 0.20
-        self._initialized = False
+        self._audio_unlocked = not IS_WEB  # Desktop: unlocked immediately
+        self._pending_music = False
 
         try:
-            # Don't quit existing mixer - just use whatever pygame.init() set up
             if not pygame.mixer.get_init():
                 pygame.mixer.init(frequency=SAMPLE_RATE, size=-16, channels=1, buffer=1024)
             pygame.mixer.set_num_channels(8)
             self._bg_channel = pygame.mixer.Channel(0)
             self.enabled = True
-            self._initialized = True
             print(f"SoundManager OK: mixer={pygame.mixer.get_init()}")
         except Exception as e:
             print(f"SoundManager init warning: {e}")
             self.enabled = False
+
+    def unlock_audio(self):
+        """Call on first user interaction (key/click) to unlock web AudioContext.
+        Browsers block audio until a user gesture occurs."""
+        if self._audio_unlocked:
+            return
+        self._audio_unlocked = True
+        print("Audio unlocked by user gesture")
+        try:
+            silent = [0] * 1024
+            snd = _make_sound(silent)
+            if snd:
+                snd.play()
+        except Exception as e:
+            print(f"Audio unlock error: {e}")
+        if self._pending_music:
+            self._pending_music = False
+            self.start_music()
 
     def _get_sound(self, name):
         """Lazy-generate a sound on first use."""
@@ -164,7 +207,7 @@ class SoundManager:
                 print(f"Music gen error: {e}")
 
     def play(self, sound_name):
-        if not self.enabled:
+        if not self.enabled or not self._audio_unlocked:
             return
         try:
             snd = self._get_sound(sound_name)
@@ -175,6 +218,9 @@ class SoundManager:
 
     def start_music(self):
         if not self.enabled or not self._bg_channel:
+            return
+        if not self._audio_unlocked:
+            self._pending_music = True
             return
         try:
             self._ensure_music()
@@ -192,6 +238,7 @@ class SoundManager:
         except Exception:
             pass
         self.music_playing = False
+        self._pending_music = False
 
     def toggle_music(self):
         if self.music_playing:

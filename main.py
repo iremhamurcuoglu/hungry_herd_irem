@@ -168,6 +168,10 @@ class Game:
                 pygame.quit()
                 sys.exit()
 
+            # Unlock web audio on first user interaction
+            if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                self.sound_manager.unlock_audio()
+
             if self.show_instructions:
                 if event.type == pygame.KEYDOWN:
                     if event.key in (pygame.K_DOWN, pygame.K_s, pygame.K_RIGHT):
