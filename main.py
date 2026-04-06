@@ -25,6 +25,9 @@ class Game:
         self.game_state = "PLAYING"
         self.mixer_initialized = False # We stay silent
 
+        # İlk ekran: web'de canvas focus almak için tıklama bekle
+        self.wait_for_focus = True
+
         # Instruction ekranı kontrolü
         self.show_instructions = True
         self.instructions_text = self._load_instructions()
@@ -142,7 +145,9 @@ class Game:
         while True:
             dt = self.clock.tick(60) / 1000.0
             self._handle_events()
-            if self.show_instructions:
+            if self.wait_for_focus:
+                self._draw_focus_screen()
+            elif self.show_instructions:
                 self._draw_instructions()
             elif self.tutorial_active:
                 if self.tutorial_phase == "intro":
@@ -166,6 +171,11 @@ class Game:
                 pygame.quit()
                 sys.exit()
 
+            # Web'de canvas focus almak için ilk etkileşim
+            if self.wait_for_focus:
+                if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
+                    self.wait_for_focus = False
+                continue
 
             if self.show_instructions:
                 if event.type == pygame.KEYDOWN:
@@ -363,6 +373,16 @@ class Game:
                 self.tutorial_step += 1
         elif action == "done":
             self.tutorial_phase = "outro"
+
+    def _draw_focus_screen(self):
+        self.screen.fill((20, 20, 35))
+        title = self.font_large.render("🐴 Feed the Herd 🥕", True, (255, 215, 0))
+        tr = title.get_rect(center=(constants.SCREEN_WIDTH // 2, 280))
+        self.screen.blit(title, tr)
+        info = self.font_large.render("▶  TIKLA veya BİR TUŞA BAS", True, (255, 255, 100))
+        ir = info.get_rect(center=(constants.SCREEN_WIDTH // 2, 400))
+        self.screen.blit(info, ir)
+        pygame.display.flip()
 
     def _draw_tutorial_intro(self):
         self.screen.fill((25, 25, 40))
