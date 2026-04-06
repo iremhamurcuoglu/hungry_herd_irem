@@ -85,11 +85,17 @@ class Game:
 
     def _load_instructions(self):
         # INSTRUCTIONS.md dosyasını oku
-        try:
-            with open(os.path.join(os.path.dirname(__file__), '../INSTRUCTIONS.md'), 'r', encoding='utf-8') as f:
-                return f.read()
-        except Exception:
-            return "Talimatlar yüklenemedi. Lütfen INSTRUCTIONS.md dosyasını kontrol edin."
+        for path in [
+            os.path.join(os.path.dirname(__file__), 'INSTRUCTIONS.md'),
+            os.path.join(os.path.dirname(__file__), '../INSTRUCTIONS.md'),
+            'INSTRUCTIONS.md',
+        ]:
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            except Exception:
+                continue
+        return "Talimatlar yüklenemedi."
     
     def reset_game(self):
         self.level = 1

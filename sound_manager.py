@@ -5,12 +5,19 @@ Drop this file next to game.py and integrate with minimal changes.
 """
 
 import pygame
-import numpy as np
 import math
 import struct
 import io
+import sys
+
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
 
 SAMPLE_RATE = 44100
+IS_WEB = sys.platform == "emscripten"
 
 
 def _generate_tone(frequency, duration, volume=0.3, wave_type="sine", fade_out=True):
@@ -104,20 +111,29 @@ class SoundManager:
     """
 
     def __init__(self):
-        pygame.mixer.init(frequency=SAMPLE_RATE, size=-16, channels=2, buffer=512)
-        pygame.mixer.set_num_channels(16)
-
-        self.enabled = True
+        self.enabled = False
         self.music_playing = False
-
-        # ── Sound Effects ──
         self.sounds = {}
-        self._generate_all_sounds()
-
-        # ── Background Music ──
-        self._bg_channel = pygame.mixer.Channel(0)
-        self._bg_sound = self._generate_background_music()
+        self._bg_channel = None
+        self._bg_sound = None
         self._bg_volume = 0.15
+
+        if not HAS_NUMPY or IS_WEB:
+            return
+
+        try:
+            pygame.mixer.init(frequency=SAMPLE_RATE, size=-16, channels=2, buffer=512)
+            pygame.mixer.set_num_channels(16)
+            self.enabled = True
+
+            # ── Sound Effects ──
+            self._generate_all_sounds()
+
+            # ── Background Music ──
+            self._bg_channel = pygame.mixer.Channel(0)
+            self._bg_sound = self._generate_background_music()
+        except Exception:
+            self.enabled = False
 
     def _generate_all_sounds(self):
         """Pre-generate all sound effects."""
@@ -224,7 +240,7 @@ class SoundManager:
 
     def start_music(self):
         """Start background music loop."""
-        if not self.enabled:
+        if not self.enabled or not self._bg_channel:
             return
         self._bg_channel.play(self._bg_sound, loops=-1)
         self._bg_channel.set_volume(self._bg_volume)
@@ -232,7 +248,8 @@ class SoundManager:
 
     def stop_music(self):
         """Stop background music."""
-        self._bg_channel.stop()
+        if self._bg_channel:
+            self._bg_channel.stop()
         self.music_playing = False
 
     def toggle_music(self):
@@ -249,4 +266,5 @@ class SoundManager:
     def set_music_volume(self, vol: float):
         """Set background music volume (0.0 - 1.0)."""
         self._bg_volume = max(0.0, min(1.0, vol))
-        self._bg_channel.set_volume(self._bg_volume)
+        if self._bg_channel:
+            self._bg_channel.set_volume(self._bg_volume)
