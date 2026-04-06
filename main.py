@@ -173,11 +173,22 @@ class Game:
                         self.reset_game()  # Oyun varlıklarını yükle
                         self.tutorial_active = True  # Tutorial başlatılırken de varlıklar hazır olsun
                     elif event.key in (pygame.K_DOWN, pygame.K_s):
-                        self.instructions_scroll += 40  # Satır yüksekliği kadar kaydır
+                        self.instructions_scroll += 40
                     elif event.key in (pygame.K_UP, pygame.K_w):
                         self.instructions_scroll -= 40
                         if self.instructions_scroll < 0:
                             self.instructions_scroll = 0
+                elif event.type == pygame.MOUSEWHEEL:
+                    self.instructions_scroll -= event.y * 40
+                    if self.instructions_scroll < 0:
+                        self.instructions_scroll = 0
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    # Ekranın alt yarısına tıklayınca aşağı, üst yarısına tıklayınca yukarı
+                    if event.button == 1:
+                        if event.pos[1] > constants.SCREEN_HEIGHT // 2:
+                            self.instructions_scroll += 60
+                        else:
+                            self.instructions_scroll = max(0, self.instructions_scroll - 60)
                 continue
 
             if self.tutorial_active:
