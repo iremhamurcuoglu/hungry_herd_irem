@@ -934,11 +934,14 @@ class Game:
             surf = font.render(text, True, color)
         self.screen.blit(surf, pos)
 
+async def main():
+    game = Game()
+    await game.run()
+
+# pygbag bu satırı yakalar ve kendi event loop'unda çalıştırır
+# Desktop'ta da asyncio.run() ile çalışır
 if __name__ == "__main__":
-    try:
-        game = Game()
-        asyncio.run(game.run())
-    except Exception as e:
-        print("Kritik Hata:", e)
-        import traceback
-        traceback.print_exc()
+    asyncio.run(main())
+else:
+    # pygbag modülü __main__ olarak çalıştırmayabilir
+    asyncio.run(main())
