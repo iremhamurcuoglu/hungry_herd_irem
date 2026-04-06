@@ -168,56 +168,19 @@ class Game:
 
 
             if self.show_instructions:
-                # Scroll kontrolleri
                 if event.type == pygame.KEYDOWN:
                     if event.key in (pygame.K_DOWN, pygame.K_s):
                         self.instructions_scroll += 40
-                        continue
                     elif event.key in (pygame.K_UP, pygame.K_w):
                         self.instructions_scroll = max(0, self.instructions_scroll - 40)
-                        continue
-                if event.type == pygame.MOUSEWHEEL:
-                    self.instructions_scroll = max(0, self.instructions_scroll - event.y * 40)
-                    continue
-                if event.type == pygame.FINGERMOTION:
-                    if self._touch_last_y is not None:
-                        dy = (self._touch_last_y - event.y) * constants.SCREEN_HEIGHT
-                        self.instructions_scroll = max(0, self.instructions_scroll + int(dy))
-                        self._touch_last_y = event.y
-                    continue
-                if event.type == pygame.FINGERDOWN:
-                    self._touch_last_y = event.y
-                    continue
-                if event.type == pygame.FINGERUP:
-                    self._touch_last_y = None
-                    continue
-                # SPACE = başlat
-                if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-                    self.show_instructions = False
-                    self.reset_game()
-                    self.tutorial_active = True
-                    continue
-                # Tıklama: sadece alt 50px "BAŞLAT" butonuna tıklayınca geç, yoksa scroll
-                if event.type == pygame.MOUSEBUTTONDOWN:
-                    if event.pos[1] >= constants.SCREEN_HEIGHT - 50:
+                    elif event.key == pygame.K_SPACE:
                         self.show_instructions = False
                         self.reset_game()
                         self.tutorial_active = True
-                    else:
-                        # Yukarı yarı = scroll up, aşağı yarı = scroll down
-                        if event.pos[1] > constants.SCREEN_HEIGHT // 2:
-                            self.instructions_scroll += 60
-                        else:
-                            self.instructions_scroll = max(0, self.instructions_scroll - 60)
                 continue
 
             if self.tutorial_active:
-                _interact = (
-                    (event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE) or
-                    event.type == pygame.MOUSEBUTTONDOWN or
-                    event.type == pygame.FINGERDOWN
-                )
-                if _interact:
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
                     if self.tutorial_phase == "intro":
                         self.tutorial_phase = "playing"
                         self.tutorial_step = 0
@@ -421,7 +384,7 @@ class Game:
             self.screen.blit(s, r)
             y += 32
         # Devam
-        info = self.font_small.render("[SPACE] veya Tıkla → Demo'yu Başlat", True, (255, 255, 100))
+        info = self.font_small.render("[SPACE] Demo'yu Başlat", True, (255, 255, 100))
         ir = info.get_rect(center=(constants.SCREEN_WIDTH // 2, 500))
         self.screen.blit(info, ir)
         pygame.display.flip()
@@ -444,7 +407,7 @@ class Game:
             r = s.get_rect(center=(constants.SCREEN_WIDTH // 2, y))
             self.screen.blit(s, r)
             y += 32
-        info = self.font_small.render("[SPACE] veya Tıkla → Oyuna Başla!", True, (255, 255, 100))
+        info = self.font_small.render("[SPACE] Oyuna Başla!", True, (255, 255, 100))
         ir = info.get_rect(center=(constants.SCREEN_WIDTH // 2, 500))
         self.screen.blit(info, ir)
         pygame.display.flip()
@@ -527,17 +490,13 @@ class Game:
                 y += font.get_height() + line_gap
             if y > self.screen.get_height() - margin_y - 40:
                 break
-        # Scroll ipucu (alt bilgi alanının üstü)
-        hint = self.font_small.render("↑↓ ok tuşları / fare tekerleği ile kaydır", True, (180, 180, 200))
-        self.screen.blit(hint, (margin_x, self.screen.get_height() - 88))
-        # BAŞLAT butonu - alt 50px yeşil çubuk
-        btn_y = self.screen.get_height() - 50
-        btn_rect = pygame.Rect(0, btn_y, self.screen.get_width(), 50)
-        pygame.draw.rect(self.screen, (30, 140, 50), btn_rect)
-        pygame.draw.rect(self.screen, (80, 220, 100), btn_rect, 2)
-        btn_text = self.font_large.render("▶  TUTORIAL'I BAŞLAT", True, (255, 255, 255))
-        bt_rect = btn_text.get_rect(center=(self.screen.get_width() // 2, btn_y + 25))
-        self.screen.blit(btn_text, bt_rect)
+        # Scroll ipucu ve devam bilgisi
+        info_bg = pygame.Surface((self.screen.get_width(), 50), pygame.SRCALPHA)
+        info_bg.fill((20, 20, 30, 220))
+        self.screen.blit(info_bg, (0, self.screen.get_height() - 50))
+        info = self.font_small.render("[W/S] veya [↑/↓] ile kaydır  |  [SPACE] ile devam et", True, (255, 255, 100))
+        ir = info.get_rect(center=(self.screen.get_width() // 2, self.screen.get_height() - 25))
+        self.screen.blit(info, ir)
         pygame.display.flip()
 
     def _buy_item(self, item_type: str) -> bool:
