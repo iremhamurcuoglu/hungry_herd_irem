@@ -3,3 +3,4 @@ __pycache__/
 .DS_Store
 .vscode/
 farm_upgrade_verify.png
+assets/sound/
