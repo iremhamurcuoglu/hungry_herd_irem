@@ -26,44 +26,33 @@ jobs:
 
     - name: Patch HTML for cross-browser support
       run: |
-        cat > /tmp/browser_patch.js << 'PATCH_EOF'
-        <!-- Cross-browser compatibility patch -->
-        <script>
-        (function() {
-          // Safari & Edge AudioContext unlock
-          var audioCtx = null;
-          function unlockAudio() {
-            if (audioCtx && audioCtx.state === 'running') return;
-            try {
-              var AC = window.AudioContext || window.webkitAudioContext;
-              if (!audioCtx) audioCtx = new AC();
-              if (audioCtx.state === 'suspended') {
-                audioCtx.resume().then(function() {
-                  console.log('AudioContext resumed');
-                });
-              }
-              // Create and play a silent buffer to fully unlock
-              var buf = audioCtx.createBuffer(1, 1, 22050);
-              var src = audioCtx.createBufferSource();
-              src.buffer = buf;
-              src.connect(audioCtx.destination);
-              src.start(0);
-            } catch(e) { console.warn('Audio unlock:', e); }
+        python3 -c "
+        patch = '''<script>
+        (function(){
+          var ac=null;
+          function u(){
+            if(ac&&ac.state==='running')return;
+            try{
+              var A=window.AudioContext||window.webkitAudioContext;
+              if(!ac)ac=new A();
+              if(ac.state==='suspended')ac.resume();
+              var b=ac.createBuffer(1,1,22050);
+              var s=ac.createBufferSource();
+              s.buffer=b;s.connect(ac.destination);s.start(0);
+            }catch(e){}
           }
-          // Unlock on any user interaction
-          ['click','touchstart','keydown','mousedown'].forEach(function(evt) {
-            document.addEventListener(evt, unlockAudio, {once: false, passive: true});
+          ['click','touchstart','keydown','mousedown'].forEach(function(e){
+            document.addEventListener(e,u,{once:false,passive:true});
           });
-          // Safari webkitAudioContext polyfill
-          if (!window.AudioContext && window.webkitAudioContext) {
-            window.AudioContext = window.webkitAudioContext;
-          }
+          if(!window.AudioContext&&window.webkitAudioContext)
+            window.AudioContext=window.webkitAudioContext;
         })();
-        </script>
-        PATCH_EOF
-        # Inject the patch right after <head> in the built HTML
-        sed -i 's|<head>|<head>\n'"$(cat /tmp/browser_patch.js)"'|' build/web/index.html
-        echo "Browser patch injected into index.html"
+        </script>'''
+        with open('build/web/index.html','r') as f: html=f.read()
+        html=html.replace('<head>','<head>'+patch,1)
+        with open('build/web/index.html','w') as f: f.write(html)
+        print('Browser patch injected')
+        "
 
     - name: Deploy to GitHub Pages
       uses: JamesIves/github-pages-deploy-action@v4
