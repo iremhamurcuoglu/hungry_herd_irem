@@ -21,11 +21,12 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font_small = pygame.font.SysFont("Arial", 20, bold=True)
         self.font_large = pygame.font.SysFont("Arial", 40, bold=True)
-        self.version = "v1.5.0"
+        self.version = "v1.6.0"
         self.game_state = "LOADING"
         self.mixer_initialized = False # We stay silent
         self._loading_done = False
         self._loading_frame = 0
+        self._bg_cache = None  # Cached background surface
 
         # Instruction ekranı kontrolü
         self.show_instructions = True
@@ -179,9 +180,28 @@ class Game:
         rect = surf.get_rect(center=(constants.SCREEN_WIDTH//2, y))
         self.screen.blit(surf, rect)
 
+    def _build_bg_cache(self):
+        """Arka planı bir kez çiz, cache'le. Her frame'de 80+ blit yerine 1 blit."""
+        self._bg_cache = pygame.Surface((constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT))
+        # Grass tiles
+        for x in range(0, constants.SCREEN_WIDTH, 100):
+            for y in range(0, constants.SCREEN_HEIGHT, 100):
+                self._bg_cache.blit(self.sprites['bg_farm_bottom'], (x, y))
+        # Carrot field
+        carrot_field_surf = pygame.Surface((constants.FARM_END, constants.FARM_MID_Y), pygame.SRCALPHA)
+        carrot_field_surf.blit(self.sprites['bg_farm_top'], (0, 0))
+        mask = pygame.Surface((constants.FARM_END, constants.FARM_MID_Y), pygame.SRCALPHA)
+        pygame.draw.rect(mask, (255, 255, 255, 255), (0, 0, constants.FARM_END, constants.FARM_MID_Y),
+                         border_top_right_radius=50, border_bottom_right_radius=50)
+        carrot_field_surf.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+        self._bg_cache.blit(carrot_field_surf, (0, 0))
+
     async def run(self):
         while True:
             dt = self.clock.tick(60) / 1000.0
+            # Cap dt to prevent jerky movement on slow frames (Edge WASM)
+            if dt > 0.05:
+                dt = 0.05
             self._handle_events()
             if self.show_instructions:
                 self._draw_instructions()
@@ -406,7 +426,7 @@ class Game:
                 dy = ty - self.player.y
                 dist = math.sqrt(dx*dx + dy*dy)
                 if dist > 10:
-                    speed = 200 * dt
+                    speed = 320 * dt  # Faster tutorial movement
                     self.player.x += (dx / dist) * speed
                     self.player.y += (dy / dist) * speed
                     return
@@ -937,22 +957,10 @@ class Game:
         # ...existing code...
 
     def _draw(self):
-        # 0. Clear screen
-        self.screen.fill((0, 0, 0))
-
-        # 1. Fill background (Grass)
-        for x in range(0, constants.SCREEN_WIDTH, 100):
-            for y in range(0, constants.SCREEN_HEIGHT, 100):
-                self.screen.blit(self.sprites['bg_farm_bottom'], (x, y))
-                
-        # 2. Carrot Field
-        carrot_field_surf = pygame.Surface((constants.FARM_END, constants.FARM_MID_Y), pygame.SRCALPHA)
-        carrot_field_surf.blit(self.sprites['bg_farm_top'], (0, 0))
-        mask = pygame.Surface((constants.FARM_END, constants.FARM_MID_Y), pygame.SRCALPHA)
-        pygame.draw.rect(mask, (255, 255, 255, 255), (0, 0, constants.FARM_END, constants.FARM_MID_Y), 
-                         border_top_right_radius=50, border_bottom_right_radius=50)
-        carrot_field_surf.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
-        self.screen.blit(carrot_field_surf, (0, 0))
+        # 0. Cached background (1 blit instead of 80+)
+        if self._bg_cache is None:
+            self._build_bg_cache()
+        self.screen.blit(self._bg_cache, (0, 0))
         
         # 3. Shop
         self._draw_text("ATLAR", (constants.HORSES_START + 10, 20), constants.COLOR_BLACK, self.font_small)
@@ -1143,6 +1151,9 @@ class Game:
 
     def _draw_onscreen_buttons(self):
         """Ekrandaki dokunmatik D-pad ve aksiyon butonlarını çiz"""
+        if not hasattr(self, '_btn_surf_cache'):
+            self._btn_surf_cache = {}
+
         # D-pad butonları
         dpad_buttons = [
             (self.btn_up, "▲"),
@@ -1154,32 +1165,34 @@ class Game:
         
         for i, (rect, label) in enumerate(dpad_buttons):
             pressed = self.virtual_keys.get(dpad_keys[i], False)
-            bg_color = (80, 80, 120, 200) if not pressed else (140, 140, 200, 230)
-            border_color = (180, 180, 220) if not pressed else (255, 255, 255)
-            
-            surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-            pygame.draw.rect(surf, bg_color, (0, 0, rect.width, rect.height), border_radius=10)
-            pygame.draw.rect(surf, border_color, (0, 0, rect.width, rect.height), width=2, border_radius=10)
-            self.screen.blit(surf, rect.topleft)
-            
-            txt = self.font_small.render(label, True, (255, 255, 255))
-            tr = txt.get_rect(center=rect.center)
-            self.screen.blit(txt, tr)
+            cache_key = (dpad_keys[i], pressed)
+            if cache_key not in self._btn_surf_cache:
+                bg_color = (80, 80, 120, 200) if not pressed else (140, 140, 200, 230)
+                border_color = (180, 180, 220) if not pressed else (255, 255, 255)
+                surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+                pygame.draw.rect(surf, bg_color, (0, 0, rect.width, rect.height), border_radius=10)
+                pygame.draw.rect(surf, border_color, (0, 0, rect.width, rect.height), width=2, border_radius=10)
+                txt = self.font_small.render(label, True, (255, 255, 255))
+                tr = txt.get_rect(center=(rect.width // 2, rect.height // 2))
+                surf.blit(txt, tr)
+                self._btn_surf_cache[cache_key] = surf
+            self.screen.blit(self._btn_surf_cache[cache_key], rect.topleft)
 
         # Aksiyon butonları
         action_buttons = [
-            (self.btn_action_e, "EK [E]", (60, 160, 60, 200)),
-            (self.btn_action_space, "AKSİYON", (60, 60, 160, 200)),
+            (self.btn_action_e, "EK [E]", "action_e", (60, 160, 60, 200)),
+            (self.btn_action_space, "AKSİYON", "action_space", (60, 60, 160, 200)),
         ]
-        for rect, label, bg in action_buttons:
-            surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-            pygame.draw.rect(surf, bg, (0, 0, rect.width, rect.height), border_radius=10)
-            pygame.draw.rect(surf, (220, 220, 255), (0, 0, rect.width, rect.height), width=2, border_radius=10)
-            self.screen.blit(surf, rect.topleft)
-            
-            txt = self.font_small.render(label, True, (255, 255, 255))
-            tr = txt.get_rect(center=rect.center)
-            self.screen.blit(txt, tr)
+        for rect, label, key, bg in action_buttons:
+            if key not in self._btn_surf_cache:
+                surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+                pygame.draw.rect(surf, bg, (0, 0, rect.width, rect.height), border_radius=10)
+                pygame.draw.rect(surf, (220, 220, 255), (0, 0, rect.width, rect.height), width=2, border_radius=10)
+                txt = self.font_small.render(label, True, (255, 255, 255))
+                tr = txt.get_rect(center=(rect.width // 2, rect.height // 2))
+                surf.blit(txt, tr)
+                self._btn_surf_cache[key] = surf
+            self.screen.blit(self._btn_surf_cache[key], rect.topleft)
 
         # Click-to-move hedef göstergesi
         if self.player.move_target_x is not None:
