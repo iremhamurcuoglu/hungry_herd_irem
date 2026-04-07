@@ -243,20 +243,7 @@ class Player:
         self.speed_boost_timer = 0.0
         self.basket_timer = 0.0
         self.basket_capacity = 1 # Default
-
-        # Mouse/touch click-to-move
-        self.move_target_x: Optional[float] = None
-        self.move_target_y: Optional[float] = None
         
-    def set_move_target(self, x: float, y: float):
-        """Mouse/touch ile hedefe yürüme"""
-        self.move_target_x = x
-        self.move_target_y = y
-
-    def clear_move_target(self):
-        self.move_target_x = None
-        self.move_target_y = None
-
     def move(self, keys, dt):
         # Update timers
         if self.speed_boost_timer > 0:
@@ -274,21 +261,6 @@ class Player:
         if keys[pygame.K_UP] or keys[pygame.K_w]: dy -= 1
         if keys[pygame.K_DOWN] or keys[pygame.K_s]: dy += 1
         
-        # Keyboard input cancels mouse target
-        if dx != 0 or dy != 0:
-            self.clear_move_target()
-        
-        # Mouse/touch click-to-move
-        if dx == 0 and dy == 0 and self.move_target_x is not None:
-            tdx = self.move_target_x - self.x
-            tdy = self.move_target_y - self.y
-            tdist = math.sqrt(tdx*tdx + tdy*tdy)
-            if tdist > 8:
-                dx = tdx / tdist
-                dy = tdy / tdist
-            else:
-                self.clear_move_target()
-
         length = math.sqrt(dx*dx + dy*dy)
         if length > 0:
             self.x += (dx/length) * self.speed * dt
