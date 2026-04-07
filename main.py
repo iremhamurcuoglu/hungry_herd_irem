@@ -21,7 +21,7 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font_small = pygame.font.SysFont("Arial", 20, bold=True)
         self.font_large = pygame.font.SysFont("Arial", 40, bold=True)
-        self.version = "v1.7.0"
+        self.version = "v1.8.0"
         self.game_state = "LOADING"
         self.mixer_initialized = False # We stay silent
         self._loading_done = False
@@ -29,6 +29,9 @@ class Game:
         self._bg_cache = None  # Cached background surface
         self._font_cache = {}  # Font render cache
         self._notif_bg_cache = None  # Notification bg cache
+
+        # Manuel tuş tracking (Edge WASM'da get_pressed() güvenilir değil)
+        self._held_keys = set()
 
         # Instruction ekranı kontrolü
         self.show_instructions = True
@@ -170,12 +173,20 @@ class Game:
             self.horses.append(h)
 
     def _draw_text(self, text, pos, color, font):
-        if isinstance(color, tuple) and len(color) == 4: # RGBA support for some calls
-            surf = font.render(text, True, color[:3])
-            surf.set_alpha(color[3])
-        else:
-            surf = font.render(text, True, color)
-        self.screen.blit(surf, pos)
+        # Cached font rendering for performance
+        cache_key = (text, color, id(font))
+        cached = self._font_cache.get(cache_key)
+        if cached is None:
+            if isinstance(color, tuple) and len(color) == 4:
+                surf = font.render(text, True, color[:3])
+                surf.set_alpha(color[3])
+            else:
+                surf = font.render(text, True, color)
+            if len(self._font_cache) > 200:
+                self._font_cache.clear()
+            self._font_cache[cache_key] = surf
+            cached = surf
+        self.screen.blit(cached, pos)
 
     def _draw_centered_text(self, text, y, color, font):
         cache_key = (text, color, id(font), 'centered')
@@ -208,8 +219,8 @@ class Game:
         while True:
             dt = self.clock.tick(60) / 1000.0
             # Cap dt to prevent jerky movement on slow frames (Edge WASM)
-            if dt > 0.05:
-                dt = 0.05
+            if dt > 0.034:
+                dt = 0.034
             self._handle_events()
             if self.show_instructions:
                 self._draw_instructions()
@@ -226,7 +237,7 @@ class Game:
                 if not self.shop_open:
                     self._update(dt)
                 self._draw()
-            await asyncio.sleep(0.001)
+            await asyncio.sleep(0)
 
 
     def _handle_events(self):
@@ -234,6 +245,12 @@ class Game:
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+
+            # Manuel tuş tracking — Edge WASM'da get_pressed() tuşları kaçırıyor
+            if event.type == pygame.KEYDOWN:
+                self._held_keys.add(event.key)
+            elif event.type == pygame.KEYUP:
+                self._held_keys.discard(event.key)
 
             # Unlock web audio on first user interaction
             if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
@@ -434,7 +451,7 @@ class Game:
                 dy = ty - self.player.y
                 dist = math.sqrt(dx*dx + dy*dy)
                 if dist > 10:
-                    speed = 320 * dt  # Faster tutorial movement
+                    speed = 400 * dt  # Fast tutorial movement
                     self.player.x += (dx / dist) * speed
                     self.player.y += (dy / dist) * speed
                     return
@@ -876,22 +893,20 @@ class Game:
         if self.level_up_timer > 0:
             self.level_up_timer -= dt
             
-        # Sanal tuşları (D-pad) klavye tuşlarıyla birleştir
-        keys = pygame.key.get_pressed()
+        # Manuel tuş tracking + D-pad birleştir (Edge WASM uyumu)
+        held = self._held_keys
+        vk = self.virtual_keys
         
-        # Virtual d-pad tuşlarını inject et (mutable list olarak)
-        class CombinedKeys:
-            def __init__(self, real_keys, virtual):
-                self._keys = real_keys
-                self._virtual = virtual
+        class ManualKeys:
+            \"\"\"_held_keys + virtual_keys birleştirici\"\"\"
             def __getitem__(self, key):
-                if key == pygame.K_UP and self._virtual.get('up'): return True
-                if key == pygame.K_DOWN and self._virtual.get('down'): return True
-                if key == pygame.K_LEFT and self._virtual.get('left'): return True
-                if key == pygame.K_RIGHT and self._virtual.get('right'): return True
-                return self._keys[key]
+                if key == pygame.K_UP and vk.get('up'): return True
+                if key == pygame.K_DOWN and vk.get('down'): return True
+                if key == pygame.K_LEFT and vk.get('left'): return True
+                if key == pygame.K_RIGHT and vk.get('right'): return True
+                return key in held
         
-        combined = CombinedKeys(keys, self.virtual_keys)
+        combined = ManualKeys()
         self.player.move(combined, dt)
         
         if any(combined[k] for k in (pygame.K_w, pygame.K_s, pygame.K_a, pygame.K_d,

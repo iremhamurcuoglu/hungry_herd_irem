@@ -242,7 +242,7 @@ class Player:
     def __init__(self):
         self.x = constants.SCREEN_WIDTH // 2
         self.y = constants.SCREEN_HEIGHT // 2
-        self.base_speed = 240
+        self.base_speed = 360
         self.speed: float = float(self.base_speed)
         self.state = PlayerState.EMPTY
         self.items: List[str] = [] # Supports multiple items for Big Basket
