@@ -313,6 +313,11 @@ class SoundManager:
 
     def toggle_sfx(self):
         self.enabled = not self.enabled
+        if not self.enabled:
+            try:
+                pygame.mixer.stop()
+            except Exception:
+                pass
 
     def set_music_volume(self, vol):
         self._bg_volume = max(0.0, min(1.0, vol))
