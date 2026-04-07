@@ -19,8 +19,21 @@ C5=523.25; D5=587.33; E5=659.25; F5=698.46
 G5=783.99; A5=880.00
 
 # Will be set after mixer init
-_MIX_FREQ = 22050
+_MIX_FREQ = 44100
 _MIX_CHANNELS = 2
+
+
+def _blend_loop_edge(samples, fade_len=512):
+    """Blend the end of a loop back toward the beginning to reduce click/pop."""
+    if len(samples) < fade_len * 2:
+        return samples
+    for i in range(fade_len):
+        mix = i / float(fade_len - 1)
+        tail_idx = len(samples) - fade_len + i
+        tail = samples[tail_idx]
+        head = samples[i]
+        samples[tail_idx] = int((tail * (1.0 - mix)) + (head * mix))
+    return samples
 
 
 def _make_sound(mono_samples):
@@ -58,15 +71,17 @@ def _tone(freq, dur, vol=0.3):
     return _make_sound(out)
 
 
-def _melody(notes, nd=0.15, vol=0.25):
+def _melody(notes, nd=0.15, vol=0.25, loop_safe=False):
     """Melody from [(freq, dur_mult), ...] tuples."""
     out = []
     tp_base = 2.0 * math.pi / _MIX_FREQ
     v = int(vol * 32767)
+    prev_sample = 0.0
     for freq, dm in notes:
         n = int(_MIX_FREQ * nd * dm)
         if freq == 0:
             out.extend([0] * n)
+            prev_sample = 0.0
         else:
             tp = tp_base * freq
             decay_start = int(n * 0.6)
@@ -76,7 +91,12 @@ def _melody(notes, nd=0.15, vol=0.25):
                     s *= i / 80.0
                 if i >= decay_start:
                     s *= (n - i) / (n - decay_start)
-                out.append(max(-32767, min(32767, int(s * v))))
+                raw_sample = s * v
+                smoothed = (raw_sample * 0.72) + (prev_sample * 0.28)
+                prev_sample = smoothed
+                out.append(max(-32767, min(32767, int(smoothed))))
+    if loop_safe:
+        _blend_loop_edge(out)
     return _make_sound(out)
 
 
@@ -125,14 +145,14 @@ class SoundManager:
         self._sounds = {}
         self._bg_channel = None
         self._bg_sound = None
-        self._bg_volume = 0.20
+        self._bg_volume = 0.14
         self._audio_unlocked = not IS_WEB
         self._pending_music = False
 
         try:
             info = pygame.mixer.get_init()
             if not info:
-                pygame.mixer.init()
+                pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
                 info = pygame.mixer.get_init()
             if info:
                 _MIX_FREQ = info[0]
@@ -180,7 +200,7 @@ class SoundManager:
         """Lazy-generate background music."""
         if self._bg_sound is None:
             try:
-                self._bg_sound = _melody(_MUSIC_NOTES, nd=0.2, vol=0.10)
+                self._bg_sound = _melody(_MUSIC_NOTES, nd=0.22, vol=0.075, loop_safe=True)
             except Exception as e:
                 print(f"Music gen error: {e}")
 
