@@ -231,11 +231,22 @@ class Game:
                         self.show_instructions = False
                         self.reset_game()
                         self.tutorial_active = True
-                # Mouse/touch: talimat ekranında herhangi bir tıklama devam etsin
+                # Mouse wheel scroll
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 4:  # scroll up
+                    self.instructions_scroll = max(0, self.instructions_scroll - 40)
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 5:  # scroll down
+                    self.instructions_scroll += 40
+                # Mouse tıklama: sadece "Devam Et" butonuna basınca devam et
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    self.show_instructions = False
-                    self.reset_game()
-                    self.tutorial_active = True
+                    mx, my = event.pos
+                    # Devam butonu: sağ alt köşe 180x40
+                    btn_w, btn_h = 180, 40
+                    btn_x = constants.SCREEN_WIDTH - btn_w - 40
+                    btn_y = constants.SCREEN_HEIGHT - 52
+                    if btn_x <= mx <= btn_x + btn_w and btn_y <= my <= btn_y + btn_h:
+                        self.show_instructions = False
+                        self.reset_game()
+                        self.tutorial_active = True
                 # Touch scroll for instructions
                 if event.type == pygame.FINGERDOWN:
                     self._touch_last_y = event.y * constants.SCREEN_HEIGHT
@@ -266,20 +277,26 @@ class Game:
                         step = self.tutorial_steps[self.tutorial_step]
                         if step["action"] == "done":
                             self.tutorial_phase = "outro"
-                # Mouse/touch: tutorial ekranlarında tıklama ile devam
+                # Mouse/touch: tutorial butonlarına tıklama ile devam
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    if self.tutorial_phase == "intro":
-                        self.tutorial_phase = "playing"
-                        self.tutorial_step = 0
-                        self.tutorial_wait = 0.0
-                        self.tutorial_feed_count = 0
-                        self.reset_game()
-                        self.sound_manager.start_music()
-                    elif self.tutorial_phase == "outro":
-                        self.tutorial_active = False
-                        self.sound_manager.stop_music()
-                        self.reset_game()
-                        self.sound_manager.start_music()
+                    mx, my = event.pos
+                    # Buton alanı: 260x50, merkez X, Y=480
+                    btn_w, btn_h = 260, 50
+                    btn_x = constants.SCREEN_WIDTH // 2 - btn_w // 2
+                    btn_y = 480
+                    if btn_x <= mx <= btn_x + btn_w and btn_y <= my <= btn_y + btn_h:
+                        if self.tutorial_phase == "intro":
+                            self.tutorial_phase = "playing"
+                            self.tutorial_step = 0
+                            self.tutorial_wait = 0.0
+                            self.tutorial_feed_count = 0
+                            self.reset_game()
+                            self.sound_manager.start_music()
+                        elif self.tutorial_phase == "outro":
+                            self.tutorial_active = False
+                            self.sound_manager.stop_music()
+                            self.reset_game()
+                            self.sound_manager.start_music()
                     elif self.tutorial_phase == "playing":
                         step = self.tutorial_steps[self.tutorial_step]
                         if step["action"] == "done":
@@ -513,10 +530,15 @@ class Game:
             r = s.get_rect(center=(constants.SCREEN_WIDTH // 2, y))
             self.screen.blit(s, r)
             y += 32
-        # Devam
-        info = self.font_small.render("[SPACE/Tıkla] Demo'yu Başlat", True, (255, 255, 100))
-        ir = info.get_rect(center=(constants.SCREEN_WIDTH // 2, 500))
-        self.screen.blit(info, ir)
+        # Tıklanabilir buton
+        btn_w, btn_h = 260, 50
+        btn_x = constants.SCREEN_WIDTH // 2 - btn_w // 2
+        btn_y = 480
+        btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+        pygame.draw.rect(self.screen, (60, 140, 60), btn_rect, border_radius=14)
+        pygame.draw.rect(self.screen, (255, 255, 100), btn_rect, width=2, border_radius=14)
+        btn_text = self.font_small.render("▶ DEMO'YU BAŞLAT", True, (255, 255, 255))
+        self.screen.blit(btn_text, btn_text.get_rect(center=btn_rect.center))
         pygame.display.flip()
 
     def _draw_tutorial_outro(self):
@@ -537,9 +559,14 @@ class Game:
             r = s.get_rect(center=(constants.SCREEN_WIDTH // 2, y))
             self.screen.blit(s, r)
             y += 32
-        info = self.font_small.render("[SPACE/Tıkla] Oyuna Başla!", True, (255, 255, 100))
-        ir = info.get_rect(center=(constants.SCREEN_WIDTH // 2, 500))
-        self.screen.blit(info, ir)
+        btn_w, btn_h = 260, 50
+        btn_x = constants.SCREEN_WIDTH // 2 - btn_w // 2
+        btn_y = 480
+        btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+        pygame.draw.rect(self.screen, (60, 60, 180), btn_rect, border_radius=14)
+        pygame.draw.rect(self.screen, (255, 255, 100), btn_rect, width=2, border_radius=14)
+        btn_text = self.font_small.render("▶ OYUNA BAŞLA!", True, (255, 255, 255))
+        self.screen.blit(btn_text, btn_text.get_rect(center=btn_rect.center))
         pygame.display.flip()
 
     def _draw_tutorial(self):
@@ -620,13 +647,28 @@ class Game:
                 y += font.get_height() + line_gap
             if y > self.screen.get_height() - margin_y - 40:
                 break
-        # Scroll ipucu ve devam bilgisi
-        info_bg = pygame.Surface((self.screen.get_width(), 50), pygame.SRCALPHA)
-        info_bg.fill((20, 20, 30, 220))
-        self.screen.blit(info_bg, (0, self.screen.get_height() - 50))
-        info = self.font_small.render("[W/S] veya [↑/↓] ile kaydır  |  [SPACE/Tıkla] devam et", True, (255, 255, 100))
-        ir = info.get_rect(center=(self.screen.get_width() // 2, self.screen.get_height() - 25))
-        self.screen.blit(info, ir)
+        # Scroll ipucu ve devam butonu
+        info_bg = pygame.Surface((self.screen.get_width(), 60), pygame.SRCALPHA)
+        info_bg.fill((20, 20, 30, 230))
+        self.screen.blit(info_bg, (0, self.screen.get_height() - 60))
+        
+        # Scroll ipucu (sol)
+        scroll_info = self.font_small.render("Mouse scroll veya [↑/↓] ile kaydır", True, (180, 180, 200))
+        self.screen.blit(scroll_info, (40, self.screen.get_height() - 45))
+        
+        # Tıklanabilir "DEVAM ET" butonu (sağ alt)
+        btn_w, btn_h = 180, 40
+        btn_x = self.screen.get_width() - btn_w - 40
+        btn_y = self.screen.get_height() - 52
+        btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+        pygame.draw.rect(self.screen, (60, 160, 60), btn_rect, border_radius=10)
+        pygame.draw.rect(self.screen, (255, 255, 100), btn_rect, width=2, border_radius=10)
+        btn_text = self.font_small.render("▶ DEVAM ET", True, (255, 255, 255))
+        btn_tr = btn_text.get_rect(center=btn_rect.center)
+        self.screen.blit(btn_text, btn_tr)
+        
+        # Devam butonu rect'ini kaydet (event handler'da kullanılacak)
+        # Alt ortada 200x50 olan eski butonla uyumlu olması için güncelle
         pygame.display.flip()
 
     def _buy_item(self, item_type: str) -> bool:
