@@ -21,7 +21,7 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font_small = pygame.font.SysFont("Arial", 20, bold=True)
         self.font_large = pygame.font.SysFont("Arial", 40, bold=True)
-        self.version = "v1.9.0"
+        self.version = "v2.0.0"
         self.game_state = "LOADING"
         self.mixer_initialized = False # We stay silent
         self._loading_done = False
@@ -33,11 +33,11 @@ class Game:
         # Manuel tuş tracking (Edge WASM'da get_pressed() güvenilir değil)
         self._held_keys = set()
 
-        # Instruction ekranı kontrolü
-        self.show_instructions = True
+        # Instructions ekranını atla - doğrudan tutoriale başla
+        self.show_instructions = False
         self.instructions_text = self._load_instructions()
-        self.instructions_scroll = 0  # Talimat ekranı için scroll offset
-        self._touch_last_y = None  # Touch/finger scroll tracking
+        self.instructions_scroll = 0
+        self._touch_last_y = None
 
         # Assets
         self.loader = AssetsLoader(os.path.join(os.getcwd(), "assets"))
@@ -66,9 +66,10 @@ class Game:
         # On-screen UI buttons for mouse/touch
         self._init_ui_buttons()
 
-        # Tutorial (otomatik demo) kontrolü
+        # Tutorial: intro/outro'yu atla, direkt oyna
         self.tutorial_active = True
-        self.tutorial_phase = "intro"  # intro -> playing -> outro
+        self.tutorial_phase = "playing"  # intro'yu atla
+        self.tutorial_step = 0
         self.tutorial_step = 0
         self.tutorial_wait = 0.0
         self.tutorial_feed_count = 0
@@ -112,26 +113,28 @@ class Game:
     
     def _init_ui_buttons(self):
         """Ekrandaki dokunmatik/mouse butonları"""
-        btn_size = 56
-        btn_gap = 10
+        btn_size = 68  # Büyük butonlar - dokunma için kolay
+        btn_gap = 8
         # Sağ alt köşede yön tuşları (D-pad)
-        dpad_x = constants.SCREEN_WIDTH - 180
-        dpad_y = constants.SCREEN_HEIGHT - 180
+        dpad_x = constants.SCREEN_WIDTH - 220
+        dpad_y = constants.SCREEN_HEIGHT - 220
         self.btn_up = pygame.Rect(dpad_x + btn_size + btn_gap, dpad_y, btn_size, btn_size)
         self.btn_down = pygame.Rect(dpad_x + btn_size + btn_gap, dpad_y + 2*(btn_size + btn_gap), btn_size, btn_size)
         self.btn_left = pygame.Rect(dpad_x, dpad_y + btn_size + btn_gap, btn_size, btn_size)
         self.btn_right = pygame.Rect(dpad_x + 2*(btn_size + btn_gap), dpad_y + btn_size + btn_gap, btn_size, btn_size)
 
-        # Sol alt köşede aksiyon butonları
+        # Sol alt köşede aksiyon butonları - daha büyük
         action_x = 20
-        action_y = constants.SCREEN_HEIGHT - 110
-        self.btn_action_e = pygame.Rect(action_x, action_y, 80, 44)
-        self.btn_action_space = pygame.Rect(action_x + 90, action_y, 100, 44)
+        action_y = constants.SCREEN_HEIGHT - 120
+        self.btn_action_e = pygame.Rect(action_x, action_y, 100, 52)
+        self.btn_action_space = pygame.Rect(action_x + 112, action_y, 120, 52)
         
         # Sanal tuş durumları (mouse/touch basılı tutma)
         self.virtual_keys = {
             'up': False, 'down': False, 'left': False, 'right': False
         }
+        # Buton surface cache'i sıfırla
+        self._btn_surf_cache = {}
 
     def _get_button_at(self, pos):
         """Verilen pozisyondaki butonu döndür"""
@@ -223,40 +226,22 @@ class Game:
             dt = min(raw_dt, 0.1)
             self._handle_events()
             
-            # _held_keys fallback: event kaçırılırsa bir sonraki frame yakalar
+            # _held_keys fallback: SPACE ile tutorial skip veya game over restart
             if pygame.K_SPACE in self._held_keys:
-                if self.show_instructions:
-                    self.show_instructions = False
+                if self.tutorial_active:
+                    # SPACE ile demoyu atla
+                    self.tutorial_active = False
+                    self.sound_manager.stop_music()
                     self.reset_game()
-                    self.tutorial_active = True
+                    self.sound_manager.start_music()
                     self._held_keys.discard(pygame.K_SPACE)
-                elif self.tutorial_active:
-                    if self.tutorial_phase == "intro":
-                        self.tutorial_phase = "playing"
-                        self.tutorial_step = 0
-                        self.tutorial_wait = 0.0
-                        self.tutorial_feed_count = 0
-                        self.reset_game()
-                        self.sound_manager.start_music()
-                        self._held_keys.discard(pygame.K_SPACE)
-                    elif self.tutorial_phase == "outro":
-                        self.tutorial_active = False
-                        self.sound_manager.stop_music()
-                        self.reset_game()
-                        self.sound_manager.start_music()
-                        self._held_keys.discard(pygame.K_SPACE)
             
             if self.show_instructions:
                 self._draw_instructions()
             elif self.tutorial_active:
-                if self.tutorial_phase == "intro":
-                    self._draw_tutorial_intro()
-                elif self.tutorial_phase == "playing":
-                    self._update_tutorial(dt)
-                    self._draw()
-                    self._draw_tutorial()
-                elif self.tutorial_phase == "outro":
-                    self._draw_tutorial_outro()
+                self._update_tutorial(dt)
+                self._draw()
+                self._draw_tutorial()
             else:
                 if not self.shop_open:
                     self._update(dt)
@@ -329,49 +314,21 @@ class Game:
                 continue
 
             if self.tutorial_active:
-                # SPACE: event-based + _held_keys fallback (Edge WASM gecikme fix)
-                space_pressed = (event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE)
-                if space_pressed:
-                    if self.tutorial_phase == "intro":
-                        self.tutorial_phase = "playing"
-                        self.tutorial_step = 0
-                        self.tutorial_wait = 0.0
-                        self.tutorial_feed_count = 0
-                        self.reset_game()
-                        self.sound_manager.start_music()
-                    elif self.tutorial_phase == "outro":
+                # Her türlü SPACE/ENTER ile demoyu atla
+                if event.type == pygame.KEYDOWN and event.key in (pygame.K_SPACE, pygame.K_RETURN, pygame.K_ESCAPE):
+                    self.tutorial_active = False
+                    self.sound_manager.stop_music()
+                    self.reset_game()
+                    self.sound_manager.start_music()
+                # Mouse/touch: "Demoyu Atla" butonuna tıklama
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mx, my = event.pos
+                    skip_rect = getattr(self, '_tutorial_skip_rect', None)
+                    if skip_rect and skip_rect.collidepoint(mx, my):
                         self.tutorial_active = False
                         self.sound_manager.stop_music()
                         self.reset_game()
                         self.sound_manager.start_music()
-                    elif self.tutorial_phase == "playing":
-                        step = self.tutorial_steps[self.tutorial_step]
-                        if step["action"] == "done":
-                            self.tutorial_phase = "outro"
-                # Mouse/touch: tutorial butonlarına tıklama ile devam
-                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    mx, my = event.pos
-                    # Buton alanı: 260x50, merkez X, Y=480
-                    btn_w, btn_h = 260, 50
-                    btn_x = constants.SCREEN_WIDTH // 2 - btn_w // 2
-                    btn_y = 480
-                    if btn_x <= mx <= btn_x + btn_w and btn_y <= my <= btn_y + btn_h:
-                        if self.tutorial_phase == "intro":
-                            self.tutorial_phase = "playing"
-                            self.tutorial_step = 0
-                            self.tutorial_wait = 0.0
-                            self.tutorial_feed_count = 0
-                            self.reset_game()
-                            self.sound_manager.start_music()
-                        elif self.tutorial_phase == "outro":
-                            self.tutorial_active = False
-                            self.sound_manager.stop_music()
-                            self.reset_game()
-                            self.sound_manager.start_music()
-                    elif self.tutorial_phase == "playing":
-                        step = self.tutorial_steps[self.tutorial_step]
-                        if step["action"] == "done":
-                            self.tutorial_phase = "outro"
                 continue
 
             # --- OYUN İÇİ MOUSE/TOUCH ---
@@ -571,7 +528,11 @@ class Game:
                 self.tutorial_wait = 0.0
                 self.tutorial_step += 1
         elif action == "done":
-            self.tutorial_phase = "outro"
+            # Outro ekranı yok, direkt oyunu başlat
+            self.tutorial_active = False
+            self.sound_manager.stop_music()
+            self.reset_game()
+            self.sound_manager.start_music()
 
     def _draw_focus_screen(self):
         self.screen.fill((20, 20, 35))
@@ -652,18 +613,24 @@ class Game:
         box_h = 70
         box_x = 60
         box_y = 20
-        overlay = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
-        overlay.fill((20, 20, 30, 220))
-        pygame.draw.rect(overlay, (255, 215, 0), (0, 0, box_w, box_h), width=3, border_radius=18)
-        self.screen.blit(overlay, (box_x, box_y))
+        if not hasattr(self, '_tutorial_box_surf'):
+            self._tutorial_box_surf = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+            self._tutorial_box_surf.fill((20, 20, 30, 220))
+            pygame.draw.rect(self._tutorial_box_surf, (255, 215, 0), (0, 0, box_w, box_h), width=3, border_radius=18)
+        self.screen.blit(self._tutorial_box_surf, (box_x, box_y))
         surf = self.font_small.render(msg, True, (255, 255, 255))
         self.screen.blit(surf, (box_x + 18, box_y + 14))
-        # Para bilgisi
         coin_text = self.font_small.render(f"Para: {self.player.coins}", True, (255, 255, 100))
         self.screen.blit(coin_text, (box_x + box_w - 160, box_y + 14))
-        # DEMO etiketi
-        tag = self.font_small.render("DEMO", True, (255, 100, 100))
-        self.screen.blit(tag, (box_x + box_w - 80, box_y + box_h - 28))
+        # "Demo'yu Atla" butonu - her zaman görünür
+        skip_rect = pygame.Rect(box_x + box_w - 170, box_y + box_h + 8, 160, 36)
+        pygame.draw.rect(self.screen, (180, 60, 60), skip_rect, border_radius=10)
+        pygame.draw.rect(self.screen, (255, 255, 255), skip_rect, width=2, border_radius=10)
+        skip_text = self.font_small.render("⏭ DEMOYU ATLA", True, (255, 255, 255))
+        self.screen.blit(skip_text, skip_text.get_rect(center=skip_rect.center))
+        # Cache the skip rect for click detection
+        self._tutorial_skip_rect = skip_rect
+        pygame.display.flip()
     def _draw_instructions(self):
         # Gelişmiş talimat ekranı, otomatik satır kaydırma ve scroll ile
         import textwrap
@@ -1127,7 +1094,7 @@ class Game:
         
         self._draw_centered_text("OYUN BİTTİ", overlay_y + 60, (255, 50, 50), self.font_large)
         self._draw_centered_text(f"Toplam Skor: {self.score}", overlay_y + 130, (255, 255, 255), self.font_small)
-        self._draw_centered_text("Yeniden Başlamak İçin SPACE/Tıkla", overlay_y + 200, (200, 200, 200), self.font_small)
+        self._draw_centered_text("Yeniden Başlamak İçin TIKLA", overlay_y + 200, (200, 200, 200), self.font_small)
 
     def _draw_stat_box(self, x, y, val, title, color):
         width, height = constants.BOX_WIDTH, constants.BOX_HEIGHT
