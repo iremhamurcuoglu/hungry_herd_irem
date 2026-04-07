@@ -139,7 +139,10 @@ jobs:
               if(note){ note.style.display='none'; }
               var rl=document.getElementById('feed-herd-readyline');
               if(rl){ rl.style.display='block'; }
-              hideOverlay();
+              // Don't hide overlay yet — wait for user click/touch
+              ['click','touchstart','keydown'].forEach(function(ev){
+                document.addEventListener(ev, hideOverlay, {once:true});
+              });
             }else{
               setTimeout(checkReady,300);
             }
