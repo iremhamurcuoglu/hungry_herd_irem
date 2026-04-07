@@ -39,12 +39,12 @@ async def custom_site():
     # unpack filesystem from compressed archive into work dir
     if platform.window.location.host.find('.itch.zone')>0:
         import zipfile
-        async with platform.fopen("hungry_herd_irem.apk?v=0da9f7b6", "rb") as archive:
+        async with platform.fopen("hungry_herd_irem.apk?v=16ab173a", "rb") as archive:
             with zipfile.ZipFile(archive) as zip_ref:
                 zip_ref.extractall(appdir.as_posix())
     else:
         import tarfile
-        async with platform.fopen("hungry_herd_irem.tar.gz?v=0da9f7b6", "rb") as archive:
+        async with platform.fopen("hungry_herd_irem.tar.gz?v=16ab173a", "rb") as archive:
             tar = tarfile.open(fileobj=archive, mode="r:gz")
             tar.extractall(path=appdir.as_posix(), filter='tar')
             tar.close()
@@ -70,7 +70,7 @@ async def custom_site():
         __import__(__name__).__file__ = main
 
         # now make a prompt
-        msg  = "Ready to start ! Please click/touch page"
+        msg  = ""
         platform.window.infobox.innerText = msg
         print("\n"*4, f"    * Waiting for media user engagement. {msg} *" , "\n"*4)
 
@@ -360,7 +360,7 @@ function show_infobox() {
     <h1 id="feed-herd-title">FEED HERD</h1>
     <div id="feed-herd-emoji">🐴 🥕 🌾 🍎</div>
     <p id="feed-herd-readyline">Ready to Start</p>
-    <p id="feed-herd-note">Oyun yuklenmesi biraz surebilir, lutfen bekleyin...</p>
+    <p id="feed-herd-note">Please click/touch page. Oyun yuklenmesi biraz surebilir, lutfen bekleyin...</p>
   </div>
 </div>
 <script>
@@ -391,7 +391,7 @@ function show_infobox() {
   }
   setTimeout(function(){
     var note=document.getElementById('feed-herd-note');
-    if(note){ note.textContent='Yukleme devam ediyor, ilk acilis 1 dakikaya kadar surebilir...'; }
+    if(note){ note.textContent='Please click/touch page. Yukleme devam ediyor, ilk acilis 1 dakikaya kadar surebilir...'; }
   }, 25000);
 })();
 </script>
