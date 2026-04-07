@@ -533,7 +533,7 @@ class Game:
         info_bg = pygame.Surface((self.screen.get_width(), 50), pygame.SRCALPHA)
         info_bg.fill((20, 20, 30, 220))
         self.screen.blit(info_bg, (0, self.screen.get_height() - 50))
-        info = self.font_small.render("[W/S] veya [↑/↓] ile kaydır  |  [SPACE] ile devam et", True, (255, 255, 100))
+        info = self.font_small.render("[W/S] ile kaydır  |  [SPACE] ile devam et", True, (255, 255, 100))
         ir = info.get_rect(center=(self.screen.get_width() // 2, self.screen.get_height() - 25))
         self.screen.blit(info, ir)
         pygame.display.flip()
