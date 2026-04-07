@@ -113,7 +113,8 @@ jobs:
           <div id="feed-herd-card">
             <h1 id="feed-herd-title">FEED HERD</h1>
             <div id="feed-herd-emoji">🐴 🥕 🌾 🍎</div>
-            <p id="feed-herd-note">Please click/touch page. Oyun yuklenmesi biraz surebilir, lutfen bekleyin...</p>
+            <p id="feed-herd-note">Oyun yuklenmesi biraz surebilir, lutfen bekleyin...</p>
+            <p id="feed-herd-readyline" style="display:none;margin:12px 0 0;font-size:clamp(16px,3.5vw,22px);font-weight:700;">Ready to Start &mdash; Please click / touch page</p>
           </div>
         </div>
         <script>
@@ -136,6 +137,8 @@ jobs:
             if(c&&c.width>100&&c.height>100){
               var note=document.getElementById('feed-herd-note');
               if(note){ note.style.display='none'; }
+              var rl=document.getElementById('feed-herd-readyline');
+              if(rl){ rl.style.display='block'; }
               hideOverlay();
             }else{
               setTimeout(checkReady,300);
@@ -148,7 +151,9 @@ jobs:
           }
           setTimeout(function(){
             var note=document.getElementById('feed-herd-note');
-            if(note){ note.textContent='Please click/touch page. Yukleme devam ediyor, ilk acilis 1 dakikaya kadar surebilir...'; }
+            if(note && note.style.display !== 'none'){
+              note.textContent='Yukleme devam ediyor, ilk acilis 1 dakikaya kadar surebilir...';
+            }
           }, 25000);
         })();
         </script>'''
