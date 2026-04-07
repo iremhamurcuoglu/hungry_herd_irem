@@ -265,10 +265,32 @@ class Game:
             else:
                 self._tutorial_time_scale = 1.0
             self._handle_events()
+            keys = pygame.key.get_pressed()
+
+            if self.show_instructions:
+                wants_continue = (
+                    pygame.K_SPACE in self._held_keys
+                    or pygame.K_RETURN in self._held_keys
+                    or pygame.K_ESCAPE in self._held_keys
+                    or keys[pygame.K_SPACE]
+                    or keys[pygame.K_RETURN]
+                    or keys[pygame.K_ESCAPE]
+                )
+                if wants_continue:
+                    self._continue_from_instructions()
+
+            if self.tutorial_active and getattr(self, "tutorial_phase", "playing") == "intro":
+                wants_start_demo = (
+                    pygame.K_SPACE in self._held_keys
+                    or pygame.K_RETURN in self._held_keys
+                    or keys[pygame.K_SPACE]
+                    or keys[pygame.K_RETURN]
+                )
+                if wants_start_demo:
+                    self._start_tutorial_demo()
             
             # _held_keys fallback: SPACE ile tutorial skip veya game over restart
             if self.tutorial_active:
-                keys = pygame.key.get_pressed()
                 wants_skip = (
                     pygame.K_SPACE in self._held_keys
                     or pygame.K_RETURN in self._held_keys
@@ -347,10 +369,8 @@ class Game:
                         self.instructions_scroll += 40
                     elif event.key in (pygame.K_UP, pygame.K_w, pygame.K_LEFT):
                         self.instructions_scroll = max(0, self.instructions_scroll - 40)
-                    elif event.key == pygame.K_SPACE:
-                        self.show_instructions = False
-                        self.reset_game()
-                        self.tutorial_active = True
+                    elif event.key in (pygame.K_SPACE, pygame.K_RETURN, pygame.K_ESCAPE):
+                        self._continue_from_instructions()
                 # Mouse wheel scroll
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 4:  # scroll up
                     self.instructions_scroll = max(0, self.instructions_scroll - 40)
@@ -609,6 +629,26 @@ class Game:
         self._held_keys.discard(pygame.K_SPACE)
         self._held_keys.discard(pygame.K_RETURN)
         self._held_keys.discard(pygame.K_ESCAPE)
+
+    def _continue_from_instructions(self):
+        self.show_instructions = False
+        self.reset_game()
+        self.tutorial_active = True
+        self._held_keys.discard(pygame.K_SPACE)
+        self._held_keys.discard(pygame.K_RETURN)
+        self._held_keys.discard(pygame.K_ESCAPE)
+
+    def _start_tutorial_demo(self):
+        if getattr(self, "tutorial_phase", "playing") != "intro":
+            return
+        self.tutorial_phase = "playing"
+        self.tutorial_step = 0
+        self.tutorial_wait = 0.0
+        self.tutorial_feed_count = 0
+        self.reset_game()
+        self.sound_manager.start_music()
+        self._held_keys.discard(pygame.K_SPACE)
+        self._held_keys.discard(pygame.K_RETURN)
 
     def _play_tutorial_sfx(self, sound_name):
         # Web'de tutorial'da sesleri kapatıp frame spike'larını azalt.
