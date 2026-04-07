@@ -26,8 +26,9 @@ jobs:
 
     - name: Patch HTML for cross-browser support
       run: |
-        python3 -c "
+        python3 <<'PY'
         import os
+
         patch = '''<script>
         (function(){
           var ac=null;
@@ -49,15 +50,21 @@ jobs:
             window.AudioContext=window.webkitAudioContext;
         })();
         </script>'''
-        with open('build/web/index.html','r') as f: html=f.read()
+
+        with open('build/web/index.html', 'r') as f:
+            html = f.read()
+
         cb = os.environ.get('GITHUB_SHA', 'dev')[:8]
-        html=html.replace('<head>','<head>'+patch,1)
+        html = html.replace('<head>', '<head>' + patch, 1)
         for src in ('hungry_herd_irem.apk', 'hungry_herd_irem.tar.gz'):
-          html=html.replace(f'\"{src}\"', f'\"{src}?v={cb}\"')
-          html=html.replace(f"'{src}'", f"'{src}?v={cb}'")
-        with open('build/web/index.html','w') as f: f.write(html)
+            html = html.replace(f'"{src}"', f'"{src}?v={cb}"')
+            html = html.replace(f"'{src}'", f"'{src}?v={cb}'")
+
+        with open('build/web/index.html', 'w') as f:
+            f.write(html)
+
         print(f'Browser patch injected with cache-bust v={cb}')
-        "
+        PY
 
     - name: Deploy to GitHub Pages
       uses: JamesIves/github-pages-deploy-action@v4
