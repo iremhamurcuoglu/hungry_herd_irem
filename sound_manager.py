@@ -193,7 +193,7 @@ class SoundManager:
         self._sounds = {}
         self._bg_channel = None
         self._bg_sound = None
-        self._bg_volume = 0.10 if IS_WEB else 0.14
+        self._bg_volume = 0.18 if IS_WEB else 0.14
         # Keep background music enabled on web, but quieter to reduce artifacts.
         self._bg_music_enabled = True
         self.music_enabled = True
@@ -252,12 +252,12 @@ class SoundManager:
         """Lazy-generate background music."""
         if self._bg_sound is None:
             try:
-                self._bg_sound = _ambient_music_loop(dur=6.0, vol=0.05)
+                self._bg_sound = _ambient_music_loop(dur=6.0, vol=0.08)
                 if self._bg_sound is None:
-                    self._bg_sound = _tone(C4, 1.4, 0.03)
+                    self._bg_sound = _tone(C4, 1.4, 0.06)
             except Exception as e:
                 print(f"Music gen error: {e}")
-                self._bg_sound = _tone(C4, 1.4, 0.03)
+                self._bg_sound = _tone(C4, 1.4, 0.06)
 
     def play(self, sound_name):
         if not self.enabled or not self._audio_unlocked:

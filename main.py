@@ -181,6 +181,11 @@ class Game:
                 if not self.sound_manager.music_playing:
                     self.sound_manager.start_music()
 
+            # Global music toggle: works in instructions/tutorial/gameplay
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_m:
+                self.sound_manager.toggle_music()
+                continue
+
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if self._music_toggle_rect and self._music_toggle_rect.collidepoint(event.pos):
                     self.sound_manager.toggle_music()
@@ -236,8 +241,6 @@ class Game:
                     self._handle_interaction()
 
                 # Shop keyboard shortcuts
-                if event.key == pygame.K_m:
-                    self.sound_manager.toggle_music()
                 if event.key == pygame.K_r:
                     self.sound_manager.stop_music()
                     self.reset_game()
