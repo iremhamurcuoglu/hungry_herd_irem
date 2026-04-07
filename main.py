@@ -736,7 +736,7 @@ class Game:
         btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
         pygame.draw.rect(self.screen, (60, 140, 60), btn_rect, border_radius=14)
         pygame.draw.rect(self.screen, (255, 255, 100), btn_rect, width=2, border_radius=14)
-        btn_text = self.font_small.render("▶ DEMO'YU BAŞLAT", True, (255, 255, 255))
+        btn_text = self.font_small.render("▶ DEMO'YU BAŞLAT [SPACE]", True, (255, 255, 255))
         self.screen.blit(btn_text, btn_text.get_rect(center=btn_rect.center))
         pygame.display.flip()
 
@@ -858,7 +858,7 @@ class Game:
         self.screen.blit(info_bg, (0, self.screen.get_height() - 60))
         
         # Scroll ipucu (sol)
-        scroll_info = self.font_small.render("Mouse scroll veya [↑/↓] ile kaydır", True, (180, 180, 200))
+        scroll_info = self.font_small.render("[W/S] veya [↑/↓] ile kaydır", True, (180, 180, 200))
         self.screen.blit(scroll_info, (40, self.screen.get_height() - 45))
         
         # Tıklanabilir "DEVAM ET" butonu (sağ alt)
@@ -868,7 +868,7 @@ class Game:
         btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
         pygame.draw.rect(self.screen, (60, 160, 60), btn_rect, border_radius=10)
         pygame.draw.rect(self.screen, (255, 255, 100), btn_rect, width=2, border_radius=10)
-        btn_text = self.font_small.render("▶ DEVAM ET", True, (255, 255, 255))
+        btn_text = self.font_small.render("▶ DEVAM ET [SPACE]", True, (255, 255, 255))
         btn_tr = btn_text.get_rect(center=btn_rect.center)
         self.screen.blit(btn_text, btn_tr)
         
