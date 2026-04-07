@@ -21,9 +21,11 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font_small = pygame.font.SysFont("Arial", 20, bold=True)
         self.font_large = pygame.font.SysFont("Arial", 40, bold=True)
-        self.version = "v1.4.0"
-        self.game_state = "PLAYING"
+        self.version = "v1.5.0"
+        self.game_state = "LOADING"
         self.mixer_initialized = False # We stay silent
+        self._loading_done = False
+        self._loading_frame = 0
 
         # Instruction ekranı kontrolü
         self.show_instructions = True
@@ -54,6 +56,9 @@ class Game:
         # Shop
         self.shop_open = False
         self.game_over = False
+
+        # On-screen UI buttons for mouse/touch
+        self._init_ui_buttons()
 
         # Tutorial (otomatik demo) kontrolü
         self.tutorial_active = True
@@ -99,6 +104,40 @@ class Game:
                 continue
         return "Talimatlar yüklenemedi."
     
+    def _init_ui_buttons(self):
+        """Ekrandaki dokunmatik/mouse butonları"""
+        btn_size = 56
+        btn_gap = 10
+        # Sağ alt köşede yön tuşları (D-pad)
+        dpad_x = constants.SCREEN_WIDTH - 180
+        dpad_y = constants.SCREEN_HEIGHT - 180
+        self.btn_up = pygame.Rect(dpad_x + btn_size + btn_gap, dpad_y, btn_size, btn_size)
+        self.btn_down = pygame.Rect(dpad_x + btn_size + btn_gap, dpad_y + 2*(btn_size + btn_gap), btn_size, btn_size)
+        self.btn_left = pygame.Rect(dpad_x, dpad_y + btn_size + btn_gap, btn_size, btn_size)
+        self.btn_right = pygame.Rect(dpad_x + 2*(btn_size + btn_gap), dpad_y + btn_size + btn_gap, btn_size, btn_size)
+
+        # Sol alt köşede aksiyon butonları
+        action_x = 20
+        action_y = constants.SCREEN_HEIGHT - 110
+        self.btn_action_e = pygame.Rect(action_x, action_y, 80, 44)
+        self.btn_action_space = pygame.Rect(action_x + 90, action_y, 100, 44)
+        
+        # Sanal tuş durumları (mouse/touch basılı tutma)
+        self.virtual_keys = {
+            'up': False, 'down': False, 'left': False, 'right': False
+        }
+
+    def _get_button_at(self, pos):
+        """Verilen pozisyondaki butonu döndür"""
+        x, y = pos
+        if self.btn_up.collidepoint(x, y): return 'up'
+        if self.btn_down.collidepoint(x, y): return 'down'
+        if self.btn_left.collidepoint(x, y): return 'left'
+        if self.btn_right.collidepoint(x, y): return 'right'
+        if self.btn_action_e.collidepoint(x, y): return 'action_e'
+        if self.btn_action_space.collidepoint(x, y): return 'action_space'
+        return None
+
     def reset_game(self):
         self.level = 1
         self.score = 0
@@ -169,8 +208,18 @@ class Game:
                 sys.exit()
 
             # Unlock web audio on first user interaction
-            if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+            if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
                 self.sound_manager.unlock_audio()
+
+            # --- Mouse/Touch: buton basılı tutma (D-pad) ---
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                btn = self._get_button_at(event.pos)
+                if btn in ('up', 'down', 'left', 'right'):
+                    self.virtual_keys[btn] = True
+            if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                # Tüm sanal tuşları bırak
+                for k in self.virtual_keys:
+                    self.virtual_keys[k] = False
 
             if self.show_instructions:
                 if event.type == pygame.KEYDOWN:
@@ -182,6 +231,21 @@ class Game:
                         self.show_instructions = False
                         self.reset_game()
                         self.tutorial_active = True
+                # Mouse/touch: talimat ekranında herhangi bir tıklama devam etsin
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    self.show_instructions = False
+                    self.reset_game()
+                    self.tutorial_active = True
+                # Touch scroll for instructions
+                if event.type == pygame.FINGERDOWN:
+                    self._touch_last_y = event.y * constants.SCREEN_HEIGHT
+                if event.type == pygame.FINGERMOTION and self._touch_last_y is not None:
+                    new_y = event.y * constants.SCREEN_HEIGHT
+                    delta = self._touch_last_y - new_y
+                    self.instructions_scroll = max(0, self.instructions_scroll + int(delta))
+                    self._touch_last_y = new_y
+                if event.type == pygame.FINGERUP:
+                    self._touch_last_y = None
                 continue
 
             if self.tutorial_active:
@@ -202,7 +266,51 @@ class Game:
                         step = self.tutorial_steps[self.tutorial_step]
                         if step["action"] == "done":
                             self.tutorial_phase = "outro"
+                # Mouse/touch: tutorial ekranlarında tıklama ile devam
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if self.tutorial_phase == "intro":
+                        self.tutorial_phase = "playing"
+                        self.tutorial_step = 0
+                        self.tutorial_wait = 0.0
+                        self.tutorial_feed_count = 0
+                        self.reset_game()
+                        self.sound_manager.start_music()
+                    elif self.tutorial_phase == "outro":
+                        self.tutorial_active = False
+                        self.sound_manager.stop_music()
+                        self.reset_game()
+                        self.sound_manager.start_music()
+                    elif self.tutorial_phase == "playing":
+                        step = self.tutorial_steps[self.tutorial_step]
+                        if step["action"] == "done":
+                            self.tutorial_phase = "outro"
                 continue
+
+            # --- OYUN İÇİ MOUSE/TOUCH ---
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = event.pos
+                btn = self._get_button_at((mx, my))
+                
+                if btn == 'action_e':
+                    self._handle_interaction()
+                elif btn == 'action_space':
+                    if self.game_over:
+                        self.reset_game()
+                    elif abs(self.player.x - constants.STORAGE_X) < 120 and abs(self.player.y - constants.STORAGE_Y) < 120:
+                        self.shop_open = not self.shop_open
+                        self.sound_manager.play("shop_open" if self.shop_open else "shop_close")
+                    elif abs(self.player.x - constants.TRASH_X) < 120 and abs(self.player.y - constants.TRASH_Y) < 120:
+                        self._handle_interaction()
+                    else:
+                        self.shop_open = False
+                elif btn in ('up', 'down', 'left', 'right'):
+                    pass  # D-pad basılı tutma yukarıda yönetiliyor
+                elif self.shop_open:
+                    # Shop butonlarına tıklama
+                    self._handle_shop_click(mx, my)
+                else:
+                    # Boş alana tıklama = click-to-move
+                    self.player.set_move_target(mx, my)
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
@@ -406,7 +514,7 @@ class Game:
             self.screen.blit(s, r)
             y += 32
         # Devam
-        info = self.font_small.render("[SPACE] Demo'yu Başlat", True, (255, 255, 100))
+        info = self.font_small.render("[SPACE/Tıkla] Demo'yu Başlat", True, (255, 255, 100))
         ir = info.get_rect(center=(constants.SCREEN_WIDTH // 2, 500))
         self.screen.blit(info, ir)
         pygame.display.flip()
@@ -429,7 +537,7 @@ class Game:
             r = s.get_rect(center=(constants.SCREEN_WIDTH // 2, y))
             self.screen.blit(s, r)
             y += 32
-        info = self.font_small.render("[SPACE] Oyuna Başla!", True, (255, 255, 100))
+        info = self.font_small.render("[SPACE/Tıkla] Oyuna Başla!", True, (255, 255, 100))
         ir = info.get_rect(center=(constants.SCREEN_WIDTH // 2, 500))
         self.screen.blit(info, ir)
         pygame.display.flip()
@@ -516,7 +624,7 @@ class Game:
         info_bg = pygame.Surface((self.screen.get_width(), 50), pygame.SRCALPHA)
         info_bg.fill((20, 20, 30, 220))
         self.screen.blit(info_bg, (0, self.screen.get_height() - 50))
-        info = self.font_small.render("[W/S] veya [↑/↓] ile kaydır  |  [SPACE] ile devam et", True, (255, 255, 100))
+        info = self.font_small.render("[W/S] veya [↑/↓] ile kaydır  |  [SPACE/Tıkla] devam et", True, (255, 255, 100))
         ir = info.get_rect(center=(self.screen.get_width() // 2, self.screen.get_height() - 25))
         self.screen.blit(info, ir)
         pygame.display.flip()
@@ -581,6 +689,29 @@ class Game:
                 self.sound_manager.play("buy")  # Play buy sound
                 return True
         return False
+
+    def _handle_shop_click(self, mx, my):
+        """Shop popup'ında mouse tıklama ile alışveriş"""
+        w, h = 500, 420
+        overlay_x = (constants.SCREEN_WIDTH - w) // 2
+        overlay_y = (constants.SCREEN_HEIGHT - h) // 2
+        # Her satır yaklaşık 40px yüksekliğinde, tıklama alanı geniş
+        items = [
+            (overlay_y + 80, overlay_y + 120, "CARROT_SEEDS", 1),
+            (overlay_y + 120, overlay_y + 160, "APPLE_SAPLING", 2),
+            (overlay_y + 160, overlay_y + 200, "WHEAT_SEEDS", 4),
+            (overlay_y + 230, overlay_y + 270, "SPEED_BOOTS", 3),
+            (overlay_y + 270, overlay_y + 310, "MEDIUM_BASKET", 3),
+            (overlay_y + 310, overlay_y + 360, "BIG_BASKET", 5),
+        ]
+        for (y_top, y_bot, item_type, min_level) in items:
+            if y_top <= my <= y_bot and overlay_x + 30 <= mx <= overlay_x + w - 30:
+                if self.level >= min_level:
+                    self._buy_item(item_type)
+                    return
+        # Kapat butonu alanı (en alt)
+        if my >= overlay_y + 370 and my <= overlay_y + h:
+            self.shop_open = False
 
     def _check_horse_finished(self, horse: Horse):
         if horse.is_finished():
@@ -675,9 +806,25 @@ class Game:
         if self.level_up_timer > 0:
             self.level_up_timer -= dt
             
-        self.player.move(pygame.key.get_pressed(), dt)
+        # Sanal tuşları (D-pad) klavye tuşlarıyla birleştir
         keys = pygame.key.get_pressed()
-        if any(keys[k] for k in (pygame.K_w, pygame.K_s, pygame.K_a, pygame.K_d,
+        
+        # Virtual d-pad tuşlarını inject et (mutable list olarak)
+        class CombinedKeys:
+            def __init__(self, real_keys, virtual):
+                self._keys = real_keys
+                self._virtual = virtual
+            def __getitem__(self, key):
+                if key == pygame.K_UP and self._virtual.get('up'): return True
+                if key == pygame.K_DOWN and self._virtual.get('down'): return True
+                if key == pygame.K_LEFT and self._virtual.get('left'): return True
+                if key == pygame.K_RIGHT and self._virtual.get('right'): return True
+                return self._keys[key]
+        
+        combined = CombinedKeys(keys, self.virtual_keys)
+        self.player.move(combined, dt)
+        
+        if any(combined[k] for k in (pygame.K_w, pygame.K_s, pygame.K_a, pygame.K_d,
                                    pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT)):
             self.step_timer -= dt
             if self.step_timer <= 0:
@@ -864,6 +1011,9 @@ class Game:
             
         self._draw_interaction_prompts()
         
+        # 8. On-screen D-pad and action buttons
+        self._draw_onscreen_buttons()
+        
         pygame.display.flip()
 
     def _draw_game_over(self):
@@ -878,7 +1028,7 @@ class Game:
         
         self._draw_centered_text("OYUN BİTTİ", overlay_y + 60, (255, 50, 50), self.font_large)
         self._draw_centered_text(f"Toplam Skor: {self.score}", overlay_y + 130, (255, 255, 255), self.font_small)
-        self._draw_centered_text("Yeniden Başlamak İçin SPACE'e Bas", overlay_y + 200, (200, 200, 200), self.font_small)
+        self._draw_centered_text("Yeniden Başlamak İçin SPACE/Tıkla", overlay_y + 200, (200, 200, 200), self.font_small)
 
     def _draw_stat_box(self, x, y, val, title, color):
         width, height = constants.BOX_WIDTH, constants.BOX_HEIGHT
@@ -933,21 +1083,69 @@ class Game:
             else:
                 self._draw_text("[!] Büyük Sepet Lvl 5'te", (overlay_x + 50, overlay_y + 320), (100, 100, 100), self.font_small)
 
-        self._draw_text("[SPACE] Kapat", (overlay_x + 180, overlay_y + 380), (200, 200, 200), self.font_small)
+        self._draw_text("[SPACE/Tıkla] Kapat", (overlay_x + 150, overlay_y + 380), (200, 200, 200), self.font_small)
 
     def _draw_interaction_prompts(self):
         # Interaction hints
         prompt = ""
         # Shop prompt
         if abs(self.player.x - constants.STORAGE_X) < 100 and abs(self.player.y - constants.STORAGE_Y) < 100:
-            prompt = "[SPACE] Marketi Aç"
+            prompt = "[SPACE/Tıkla] Market"
         
         # Plant hint
         if any(item in self.player.items for item in ["SEED", "SAPLING", "WHEAT_SEED"]) and self.player.x < constants.FARM_END:
-            prompt = "[E] Ek"
+            prompt = "[E/EK Butonu] Ek"
 
         if prompt:
             self._draw_centered_text(prompt, self.player.y - 70, constants.COLOR_BLACK, self.font_small)
+
+    def _draw_onscreen_buttons(self):
+        """Ekrandaki dokunmatik D-pad ve aksiyon butonlarını çiz"""
+        # D-pad butonları
+        dpad_buttons = [
+            (self.btn_up, "▲"),
+            (self.btn_down, "▼"),
+            (self.btn_left, "◀"),
+            (self.btn_right, "▶"),
+        ]
+        dpad_keys = ['up', 'down', 'left', 'right']
+        
+        for i, (rect, label) in enumerate(dpad_buttons):
+            pressed = self.virtual_keys.get(dpad_keys[i], False)
+            bg_color = (80, 80, 120, 200) if not pressed else (140, 140, 200, 230)
+            border_color = (180, 180, 220) if not pressed else (255, 255, 255)
+            
+            surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            pygame.draw.rect(surf, bg_color, (0, 0, rect.width, rect.height), border_radius=10)
+            pygame.draw.rect(surf, border_color, (0, 0, rect.width, rect.height), width=2, border_radius=10)
+            self.screen.blit(surf, rect.topleft)
+            
+            txt = self.font_small.render(label, True, (255, 255, 255))
+            tr = txt.get_rect(center=rect.center)
+            self.screen.blit(txt, tr)
+
+        # Aksiyon butonları
+        action_buttons = [
+            (self.btn_action_e, "EK [E]", (60, 160, 60, 200)),
+            (self.btn_action_space, "AKSİYON", (60, 60, 160, 200)),
+        ]
+        for rect, label, bg in action_buttons:
+            surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            pygame.draw.rect(surf, bg, (0, 0, rect.width, rect.height), border_radius=10)
+            pygame.draw.rect(surf, (220, 220, 255), (0, 0, rect.width, rect.height), width=2, border_radius=10)
+            self.screen.blit(surf, rect.topleft)
+            
+            txt = self.font_small.render(label, True, (255, 255, 255))
+            tr = txt.get_rect(center=rect.center)
+            self.screen.blit(txt, tr)
+
+        # Click-to-move hedef göstergesi
+        if self.player.move_target_x is not None:
+            tx = int(self.player.move_target_x)
+            ty = int(self.player.move_target_y)
+            pygame.draw.circle(self.screen, (255, 255, 100, 120), (tx, ty), 8, 2)
+            pygame.draw.line(self.screen, (255, 255, 100, 80), (tx - 5, ty), (tx + 5, ty), 1)
+            pygame.draw.line(self.screen, (255, 255, 100, 80), (tx, ty - 5), (tx, ty + 5), 1)
 
     def _draw_text(self, text, pos, color, font):
         if isinstance(color, tuple) and len(color) == 4: # RGBA support for some calls
