@@ -122,30 +122,27 @@ asyncio.run( custom_site() )
 #
 # do not alter that comment block it is separating python code from html code
 # =============================================================================
-# --></script><head>
-<style>
-body { margin: 0; overflow: hidden; background: #1a1a2e; }
-canvas { display: block; margin: 0 auto; touch-action: none; }
-#loading-overlay {
-  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-  background: #1a1a2e; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; z-index: 9999;
-  transition: opacity 0.5s;
-}
-#loading-overlay.hidden { opacity: 0; pointer-events: none; }
-.spinner {
-  width: 60px; height: 60px; border: 6px solid #333;
-  border-top: 6px solid #ffd700; border-radius: 50%;
-  animation: spin 1s linear infinite; margin-bottom: 20px;
-}
-@keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
-.loading-text { color: #ffd700; font-family: Arial, sans-serif; font-size: 18px; }
-.loading-sub { color: #888; font-family: Arial, sans-serif; font-size: 13px; margin-top: 8px; }
-.loading-tip { color: #aaa; font-family: Arial, sans-serif; font-size: 12px; margin-top: 20px; max-width: 300px; text-align: center; }
-</style>
-<meta http-equiv="X-UA-Compatible" content="IE=edge">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="mobile-web-app-capable" content="yes"><!--
+# --></script><head><script>
+(function(){
+  var ac=null;
+  function u(){
+    if(ac&&ac.state==='running')return;
+    try{
+      var A=window.AudioContext||window.webkitAudioContext;
+      if(!ac)ac=new A();
+      if(ac.state==='suspended')ac.resume();
+      var b=ac.createBuffer(1,1,22050);
+      var s=ac.createBufferSource();
+      s.buffer=b;s.connect(ac.destination);s.start(0);
+    }catch(e){}
+  }
+  ['click','touchstart','keydown','mousedown'].forEach(function(e){
+    document.addEventListener(e,u,{once:false,passive:true});
+  });
+  if(!window.AudioContext&&window.webkitAudioContext)
+    window.AudioContext=window.webkitAudioContext;
+})();
+</script><!--
 //=============================================================================
 //
 //
@@ -172,7 +169,7 @@ config = {
     user_canvas : 0,
     user_canvas_managed : 0,
     gui_divider : 2,
-    ume_block : 0,
+    ume_block : 1,
     can_close : 0,
     archive : "hungry_herd_irem",
     gui_debug : 2,
@@ -309,74 +306,9 @@ function show_infobox() {
 
     <script src="https://pygame-web.github.io/cdn/0.9.3//browserfs.min.js"></script>
 
-<script>
-// Audio unlock for all browsers
-(function(){
-  var ac=null;
-  function u(){
-    if(ac&&ac.state==='running')return;
-    try{
-      var A=window.AudioContext||window.webkitAudioContext;
-      if(!ac)ac=new A();
-      if(ac.state==='suspended')ac.resume();
-      var b=ac.createBuffer(1,1,22050);
-      var s=ac.createBufferSource();
-      s.buffer=b;s.connect(ac.destination);s.start(0);
-    }catch(e){}
-  }
-  ['click','touchstart','keydown','mousedown'].forEach(function(e){
-    document.addEventListener(e,u,{once:false,passive:true});
-  });
-  if(!window.AudioContext&&window.webkitAudioContext)
-    window.AudioContext=window.webkitAudioContext;
-})();
-
-// Edge/Chromium: SharedArrayBuffer polyfill check
-(function(){
-  if(typeof SharedArrayBuffer==='undefined'){
-    console.warn('SharedArrayBuffer not available, using fallback');
-    try{window.SharedArrayBuffer=ArrayBuffer;}catch(e){}
-  }
-})();
-
-// Prevent keyboard events from scrolling the page (Edge issue)
-window.addEventListener('keydown', function(e){
-  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space',' '].indexOf(e.key)!==-1){
-    e.preventDefault();
-  }
-}, {passive: false});
-
-// Prevent touch scrolling on canvas
-document.addEventListener('touchmove', function(e){
-  if(e.target.tagName==='CANVAS') e.preventDefault();
-}, {passive: false});
-</script>
 </head>
 
 <body>
-<div id="loading-overlay">
-  <div class="spinner"></div>
-  <div class="loading-text">🐴 Feed the Herd 🥕</div>
-  <div class="loading-sub">Oyun yükleniyor...</div>
-  <div class="loading-tip">İlk yüklemede biraz zaman alabilir.<br>Lütfen bekleyin.</div>
-</div>
-<script>
-// Hide loading overlay when pygame canvas is ready
-(function checkReady(){
-  var canvas = document.querySelector('canvas');
-  if(canvas && canvas.width > 100){
-    var ov = document.getElementById('loading-overlay');
-    if(ov){ ov.classList.add('hidden'); setTimeout(function(){ov.remove();}, 600); }
-  } else {
-    setTimeout(checkReady, 300);
-  }
-})();
-// Fallback: remove after 30s max
-setTimeout(function(){
-  var ov = document.getElementById('loading-overlay');
-  if(ov){ ov.classList.add('hidden'); setTimeout(function(){ov.remove();}, 600); }
-}, 30000);
-</script>
 
     <div id="transfer" align=center>
 <!--        <div class="spinner" id='spinner'></div> -->
@@ -522,22 +454,5 @@ frameborder="1"
 
     </script>
 
-<script>
-// Ensure canvas gets focus for keyboard events (Edge fix)
-document.addEventListener('DOMContentLoaded', function(){
-  var waitCanvas = setInterval(function(){
-    var c = document.querySelector('canvas');
-    if(c){
-      clearInterval(waitCanvas);
-      c.setAttribute('tabindex', '0');
-      c.focus();
-      c.addEventListener('click', function(){ c.focus(); });
-      c.addEventListener('touchstart', function(){ c.focus(); });
-      // Prevent right-click context menu
-      c.addEventListener('contextmenu', function(e){ e.preventDefault(); });
-    }
-  }, 200);
-});
-</script>
 </body>
 </html>
