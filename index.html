@@ -39,12 +39,12 @@ async def custom_site():
     # unpack filesystem from compressed archive into work dir
     if platform.window.location.host.find('.itch.zone')>0:
         import zipfile
-        async with platform.fopen("hungry_herd_irem.apk?v=bba04b78", "rb") as archive:
+        async with platform.fopen("hungry_herd_irem.apk?v=8275429f", "rb") as archive:
             with zipfile.ZipFile(archive) as zip_ref:
                 zip_ref.extractall(appdir.as_posix())
     else:
         import tarfile
-        async with platform.fopen("hungry_herd_irem.tar.gz?v=bba04b78", "rb") as archive:
+        async with platform.fopen("hungry_herd_irem.tar.gz?v=8275429f", "rb") as archive:
             tar = tarfile.open(fileobj=archive, mode="r:gz")
             tar.extractall(path=appdir.as_posix(), filter='tar')
             tar.close()
@@ -359,7 +359,6 @@ function show_infobox() {
   <div id="feed-herd-card">
     <h1 id="feed-herd-title">FEED HERD</h1>
     <div id="feed-herd-emoji">🐴 🥕 🌾 🍎</div>
-    <p id="feed-herd-readyline">Ready to Start</p>
     <p id="feed-herd-note">Please click/touch page. Oyun yuklenmesi biraz surebilir, lutfen bekleyin...</p>
   </div>
 </div>
@@ -381,6 +380,8 @@ function show_infobox() {
     suppressLegacyOverlay();
     var c=document.querySelector('canvas');
     if(c&&c.width>100&&c.height>100){
+      var note=document.getElementById('feed-herd-note');
+      if(note){ note.style.display='none'; }
       hideOverlay();
     }else{
       setTimeout(checkReady,300);
