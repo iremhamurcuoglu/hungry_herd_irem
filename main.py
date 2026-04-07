@@ -21,7 +21,7 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font_small = pygame.font.SysFont("Arial", 20, bold=True)
         self.font_large = pygame.font.SysFont("Arial", 40, bold=True)
-        self.version = "v2.0.0"
+        self.version = "v1.9.0"
         self.game_state = "LOADING"
         self.mixer_initialized = False # We stay silent
         self._loading_done = False
@@ -29,24 +29,15 @@ class Game:
         self._bg_cache = None  # Cached background surface
         self._font_cache = {}  # Font render cache
         self._notif_bg_cache = None  # Notification bg cache
-        self._tutorial_time_scale = 1.0
-        self._is_web = (sys.platform == "emscripten")
-        self._tutorial_ultra_mode = self._is_web
-        self._web_fast_mode = self._is_web
-
-        # Web'de ses miksleme maliyeti yüksekse doğrudan kapat.
-        if self._web_fast_mode:
-            self.sound_manager.enabled = False
-            self.sound_manager.stop_music()
 
         # Manuel tuş tracking (Edge WASM'da get_pressed() güvenilir değil)
         self._held_keys = set()
 
-        # Instructions ekranını atla - doğrudan tutoriale başla
-        self.show_instructions = False
-        self.instructions_text = self._load_instructions() if self.show_instructions else ""
-        self.instructions_scroll = 0
-        self._touch_last_y = None
+        # Instruction ekranı kontrolü
+        self.show_instructions = True
+        self.instructions_text = self._load_instructions()
+        self.instructions_scroll = 0  # Talimat ekranı için scroll offset
+        self._touch_last_y = None  # Touch/finger scroll tracking
 
         # Assets
         self.loader = AssetsLoader(os.path.join(os.getcwd(), "assets"))
@@ -75,9 +66,9 @@ class Game:
         # On-screen UI buttons for mouse/touch
         self._init_ui_buttons()
 
-        # Tutorial devre dışı: oyun doğrudan başlasın.
-        self.tutorial_active = False
-        self.tutorial_phase = "playing"  # intro'yu atla
+        # Tutorial (otomatik demo) kontrolü
+        self.tutorial_active = True
+        self.tutorial_phase = "intro"  # intro -> playing -> outro
         self.tutorial_step = 0
         self.tutorial_wait = 0.0
         self.tutorial_feed_count = 0
@@ -103,10 +94,6 @@ class Game:
             {"target": None, "action": "done", "msg": ""},
         ]
 
-        # Tutorial aktifse sesleri önceden hazırla.
-        if self.tutorial_active and (not self._web_fast_mode):
-            self._prewarm_tutorial_audio()
-
         self.reset_game()
 
     def _load_instructions(self):
@@ -122,46 +109,29 @@ class Game:
             except Exception:
                 continue
         return "Talimatlar yüklenemedi."
-
-    def _prewarm_tutorial_audio(self):
-        """Tutorial'da ilk kez çalınan sesleri önceden üretip cache'e alır."""
-        names = [
-            "buy", "plant", "harvest_carrot", "feed", "poop_collect", "coin",
-            "horse_done", "poop_spawn", "shop_open", "shop_close"
-        ]
-        getter = getattr(self.sound_manager, "_get_sound", None)
-        if getter is None:
-            return
-        for name in names:
-            try:
-                getter(name)
-            except Exception:
-                pass
     
     def _init_ui_buttons(self):
         """Ekrandaki dokunmatik/mouse butonları"""
-        btn_size = 68  # Büyük butonlar - dokunma için kolay
-        btn_gap = 8
+        btn_size = 56
+        btn_gap = 10
         # Sağ alt köşede yön tuşları (D-pad)
-        dpad_x = constants.SCREEN_WIDTH - 220
-        dpad_y = constants.SCREEN_HEIGHT - 220
+        dpad_x = constants.SCREEN_WIDTH - 180
+        dpad_y = constants.SCREEN_HEIGHT - 180
         self.btn_up = pygame.Rect(dpad_x + btn_size + btn_gap, dpad_y, btn_size, btn_size)
         self.btn_down = pygame.Rect(dpad_x + btn_size + btn_gap, dpad_y + 2*(btn_size + btn_gap), btn_size, btn_size)
         self.btn_left = pygame.Rect(dpad_x, dpad_y + btn_size + btn_gap, btn_size, btn_size)
         self.btn_right = pygame.Rect(dpad_x + 2*(btn_size + btn_gap), dpad_y + btn_size + btn_gap, btn_size, btn_size)
 
-        # Sol alt köşede aksiyon butonları - daha büyük
+        # Sol alt köşede aksiyon butonları
         action_x = 20
-        action_y = constants.SCREEN_HEIGHT - 120
-        self.btn_action_e = pygame.Rect(action_x, action_y, 100, 52)
-        self.btn_action_space = pygame.Rect(action_x + 112, action_y, 120, 52)
+        action_y = constants.SCREEN_HEIGHT - 110
+        self.btn_action_e = pygame.Rect(action_x, action_y, 80, 44)
+        self.btn_action_space = pygame.Rect(action_x + 90, action_y, 100, 44)
         
         # Sanal tuş durumları (mouse/touch basılı tutma)
         self.virtual_keys = {
             'up': False, 'down': False, 'left': False, 'right': False
         }
-        # Buton surface cache'i sıfırla
-        self._btn_surf_cache = {}
 
     def _get_button_at(self, pos):
         """Verilen pozisyondaki butonu döndür"""
@@ -247,83 +217,50 @@ class Game:
 
     async def run(self):
         while True:
-            target_fps = 30 if self._web_fast_mode else 60
-            raw_dt = self.clock.tick(target_fps) / 1000.0
+            raw_dt = self.clock.tick(60) / 1000.0
             # Edge WASM'da FPS düşük olabilir (10-20 FPS)
             # dt'yi 0.1'e cap'le ama hareketi yeterli tut
-            dt = min(raw_dt, 0.12)
-            # Tutorial'ı düşük FPS'te Safari temposuna yaklaştırmak için adaptif çarpan.
-            if raw_dt > 0.055:
-                self._tutorial_time_scale = 1.8
-            elif raw_dt > 0.04:
-                self._tutorial_time_scale = 1.5
-            elif raw_dt > 0.03:
-                self._tutorial_time_scale = 1.3
-            else:
-                self._tutorial_time_scale = 1.15
+            dt = min(raw_dt, 0.1)
             self._handle_events()
-            keys = pygame.key.get_pressed()
-
-            if self.show_instructions:
-                wants_continue = (
-                    pygame.K_SPACE in self._held_keys
-                    or pygame.K_RETURN in self._held_keys
-                    or pygame.K_ESCAPE in self._held_keys
-                    or keys[pygame.K_SPACE]
-                    or keys[pygame.K_RETURN]
-                    or keys[pygame.K_ESCAPE]
-                )
-                if wants_continue:
-                    self._continue_from_instructions()
-
-            if self.tutorial_active and getattr(self, "tutorial_phase", "playing") == "intro":
-                wants_start_demo = (
-                    pygame.K_SPACE in self._held_keys
-                    or pygame.K_RETURN in self._held_keys
-                    or keys[pygame.K_SPACE]
-                    or keys[pygame.K_RETURN]
-                )
-                if wants_start_demo:
-                    self._start_tutorial_demo()
             
-            # _held_keys fallback: SPACE ile tutorial skip veya game over restart
-            if self.tutorial_active:
-                wants_skip = (
-                    pygame.K_SPACE in self._held_keys
-                    or pygame.K_RETURN in self._held_keys
-                    or pygame.K_ESCAPE in self._held_keys
-                    or keys[pygame.K_SPACE]
-                    or keys[pygame.K_RETURN]
-                    or keys[pygame.K_ESCAPE]
-                )
-                if wants_skip:
-                    self._skip_tutorial()
+            # _held_keys fallback: event kaçırılırsa bir sonraki frame yakalar
+            if pygame.K_SPACE in self._held_keys:
+                if self.show_instructions:
+                    self.show_instructions = False
+                    self.reset_game()
+                    self.tutorial_active = True
+                    self._held_keys.discard(pygame.K_SPACE)
+                elif self.tutorial_active:
+                    if self.tutorial_phase == "intro":
+                        self.tutorial_phase = "playing"
+                        self.tutorial_step = 0
+                        self.tutorial_wait = 0.0
+                        self.tutorial_feed_count = 0
+                        self.reset_game()
+                        self.sound_manager.start_music()
+                        self._held_keys.discard(pygame.K_SPACE)
+                    elif self.tutorial_phase == "outro":
+                        self.tutorial_active = False
+                        self.sound_manager.stop_music()
+                        self.reset_game()
+                        self.sound_manager.start_music()
+                        self._held_keys.discard(pygame.K_SPACE)
             
             if self.show_instructions:
                 self._draw_instructions()
             elif self.tutorial_active:
-                updates = 1
-                if raw_dt > 0.055:
-                    updates = 2
-                elif raw_dt > 0.035:
-                    updates = 2
-                step_dt = dt / updates
-                for _ in range(updates):
-                    if not self.tutorial_active:
-                        break
-                    self._update_tutorial(step_dt)
-
-                if self._tutorial_ultra_mode:
-                    self._draw_tutorial_scene()
-                else:
-                    self._draw(present=False, lightweight=True)
-                self._draw_tutorial()
-                pygame.display.flip()
+                if self.tutorial_phase == "intro":
+                    self._draw_tutorial_intro()
+                elif self.tutorial_phase == "playing":
+                    self._update_tutorial(dt)
+                    self._draw()
+                    self._draw_tutorial()
+                elif self.tutorial_phase == "outro":
+                    self._draw_tutorial_outro()
             else:
                 if not self.shop_open:
                     self._update(dt)
-                lightweight = self._web_fast_mode and (not self.shop_open) and (not self.game_over)
-                self._draw(lightweight=lightweight)
+                self._draw()
             await asyncio.sleep(0)
 
 
@@ -333,21 +270,14 @@ class Game:
                 pygame.quit()
                 sys.exit()
 
-            # Focus kaybında tuşlar takılı kalmasın (Edge/Web)
-            if event.type in (pygame.WINDOWFOCUSLOST, pygame.ACTIVEEVENT):
-                if event.type == pygame.WINDOWFOCUSLOST or getattr(event, 'gain', 1) == 0:
-                    self._held_keys.clear()
-                    for k in self.virtual_keys:
-                        self.virtual_keys[k] = False
-
             # Manuel tuş tracking — Edge WASM'da get_pressed() tuşları kaçırıyor
             if event.type == pygame.KEYDOWN:
                 self._held_keys.add(event.key)
             elif event.type == pygame.KEYUP:
                 self._held_keys.discard(event.key)
 
-            # Web fast mode'da ses kapalı: unlock audio çağrısını atla.
-            if (not self._web_fast_mode) and event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
+            # Unlock web audio on first user interaction
+            if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
                 self.sound_manager.unlock_audio()
 
             # --- Mouse/Touch: buton basılı tutma (D-pad) ---
@@ -366,8 +296,10 @@ class Game:
                         self.instructions_scroll += 40
                     elif event.key in (pygame.K_UP, pygame.K_w, pygame.K_LEFT):
                         self.instructions_scroll = max(0, self.instructions_scroll - 40)
-                    elif event.key in (pygame.K_SPACE, pygame.K_RETURN, pygame.K_ESCAPE):
-                        self._continue_from_instructions()
+                    elif event.key == pygame.K_SPACE:
+                        self.show_instructions = False
+                        self.reset_game()
+                        self.tutorial_active = True
                 # Mouse wheel scroll
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 4:  # scroll up
                     self.instructions_scroll = max(0, self.instructions_scroll - 40)
@@ -397,19 +329,49 @@ class Game:
                 continue
 
             if self.tutorial_active:
-                # Her türlü SPACE/ENTER ile demoyu atla
-                if event.type == pygame.KEYDOWN and event.key in (pygame.K_SPACE, pygame.K_RETURN, pygame.K_ESCAPE):
-                    self._skip_tutorial()
-                # Mouse/touch: "Demoyu Atla" butonuna tıklama
+                # SPACE: event-based + _held_keys fallback (Edge WASM gecikme fix)
+                space_pressed = (event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE)
+                if space_pressed:
+                    if self.tutorial_phase == "intro":
+                        self.tutorial_phase = "playing"
+                        self.tutorial_step = 0
+                        self.tutorial_wait = 0.0
+                        self.tutorial_feed_count = 0
+                        self.reset_game()
+                        self.sound_manager.start_music()
+                    elif self.tutorial_phase == "outro":
+                        self.tutorial_active = False
+                        self.sound_manager.stop_music()
+                        self.reset_game()
+                        self.sound_manager.start_music()
+                    elif self.tutorial_phase == "playing":
+                        step = self.tutorial_steps[self.tutorial_step]
+                        if step["action"] == "done":
+                            self.tutorial_phase = "outro"
+                # Mouse/touch: tutorial butonlarına tıklama ile devam
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     mx, my = event.pos
-                    btn = self._get_button_at((mx, my))
-                    if btn == 'action_space':
-                        self._skip_tutorial()
-                        continue
-                    skip_rect = getattr(self, '_tutorial_skip_rect', None)
-                    if skip_rect and skip_rect.collidepoint(mx, my):
-                        self._skip_tutorial()
+                    # Buton alanı: 260x50, merkez X, Y=480
+                    btn_w, btn_h = 260, 50
+                    btn_x = constants.SCREEN_WIDTH // 2 - btn_w // 2
+                    btn_y = 480
+                    if btn_x <= mx <= btn_x + btn_w and btn_y <= my <= btn_y + btn_h:
+                        if self.tutorial_phase == "intro":
+                            self.tutorial_phase = "playing"
+                            self.tutorial_step = 0
+                            self.tutorial_wait = 0.0
+                            self.tutorial_feed_count = 0
+                            self.reset_game()
+                            self.sound_manager.start_music()
+                        elif self.tutorial_phase == "outro":
+                            self.tutorial_active = False
+                            self.sound_manager.stop_music()
+                            self.reset_game()
+                            self.sound_manager.start_music()
+                    elif self.tutorial_phase == "playing":
+                        step = self.tutorial_steps[self.tutorial_step]
+                        if step["action"] == "done":
+                            self.tutorial_phase = "outro"
                 continue
 
             # --- OYUN İÇİ MOUSE/TOUCH ---
@@ -477,10 +439,9 @@ class Game:
                     if (event.key == pygame.K_6 or event.key == pygame.K_KP6) and self.level >= 5:
                         self._buy_item("BIG_BASKET")
     def _update_tutorial(self, dt):
-        tdt = dt * self._tutorial_time_scale
         # Her zaman crop'ları güncelle (büyüme ekranda görünsün)
         for crop in self.crops:
-            crop.update(tdt)
+            crop.update(dt)
 
         if self.tutorial_step >= len(self.tutorial_steps):
             return
@@ -516,11 +477,10 @@ class Game:
                 dy = ty - self.player.y
                 dist = math.sqrt(dx*dx + dy*dy)
                 if dist > 10:
-                    # Çok düşük FPS'te bile zıplama olmasın diye adımı sınırla.
-                    move_amount = max(760 * tdt, 10.0)
-                    move_amount = min(move_amount, 18.0, dist)
-                    self.player.x += (dx / dist) * move_amount
-                    self.player.y += (dy / dist) * move_amount
+                    # Piksel-bazlı minimum hız: en az 6 px/frame
+                    speed = max(500 * dt, 6.0)
+                    self.player.x += (dx / dist) * speed
+                    self.player.y += (dy / dist) * speed
                     return
                 else:
                     # Hedefe ulaştı, sonraki adıma geç
@@ -534,9 +494,9 @@ class Game:
                 self.player.carrot_seeds = 5
                 self.player.items.clear()
                 self.player.items.append("SEED")
-                self._play_tutorial_sfx("buy")
-            self.tutorial_wait += tdt
-            if self.tutorial_wait > 0.5:
+                self.sound_manager.play("buy")
+            self.tutorial_wait += dt
+            if self.tutorial_wait > 0.8:
                 self.tutorial_wait = 0.0
                 self.tutorial_step += 1
         elif action == "plant_all":
@@ -548,19 +508,19 @@ class Game:
                         self.crops.append(Crop(px, py, FoodType.CARROT))
                         self.player.carrot_seeds -= 1
                 self.player.items.clear()  # Tohum kafadan kalksın
-                self._play_tutorial_sfx("plant")
-            self.tutorial_wait += tdt
-            if self.tutorial_wait > 0.65:
+                self.sound_manager.play("plant")
+            self.tutorial_wait += dt
+            if self.tutorial_wait > 1.0:
                 self.tutorial_wait = 0.0
                 self.tutorial_step += 1
         elif action == "wait_grow_all":
             # Tüm crop'ları hızlandır
             for crop in self.crops:
-                crop.timer += tdt * 4
+                crop.timer += dt * 4
             # En az 1 tanesi mature olunca geç
             if any(c.state == CropState.MATURE for c in self.crops):
-                self.tutorial_wait += tdt
-                if self.tutorial_wait > 0.35:
+                self.tutorial_wait += dt
+                if self.tutorial_wait > 0.5:
                     self.tutorial_wait = 0.0
                     self.tutorial_step += 1
         elif action == "harvest_one":
@@ -570,10 +530,10 @@ class Game:
                         self.crops.remove(crop)
                         self.player.items.clear()
                         self.player.items.append("CARROT")
-                        self._play_tutorial_sfx("harvest_carrot")
+                        self.sound_manager.play("harvest_carrot")
                         break
-            self.tutorial_wait += tdt
-            if self.tutorial_wait > 0.35:
+            self.tutorial_wait += dt
+            if self.tutorial_wait > 0.5:
                 self.tutorial_wait = 0.0
                 self.tutorial_step += 1
         elif action == "feed":
@@ -581,12 +541,12 @@ class Game:
                 if "CARROT" in self.player.items and self.horses:
                     self.horses[0].receive_food(FoodType.CARROT)
                     self.player.items.clear()
-                    self._play_tutorial_sfx("feed")
+                    self.sound_manager.play("feed")
                     self.tutorial_feed_count += 1
                     if not self.poops:
                         self.poops.append(Poop(self.horses[0].x + 100, self.horses[0].y + 10))
-            self.tutorial_wait += tdt
-            if self.tutorial_wait > 0.65:
+            self.tutorial_wait += dt
+            if self.tutorial_wait > 1.0:
                 self.tutorial_wait = 0.0
                 self.tutorial_step += 1
         elif action == "collect_poop":
@@ -595,9 +555,9 @@ class Game:
                     self.poops.pop(0)
                     self.player.items.clear()
                     self.player.items.append("POOP")
-                    self._play_tutorial_sfx("poop_collect")
-            self.tutorial_wait += tdt
-            if self.tutorial_wait > 0.4:
+                    self.sound_manager.play("poop_collect")
+            self.tutorial_wait += dt
+            if self.tutorial_wait > 0.6:
                 self.tutorial_wait = 0.0
                 self.tutorial_step += 1
         elif action == "sell_poop":
@@ -605,95 +565,13 @@ class Game:
                 if "POOP" in self.player.items:
                     self.player.items.clear()
                     self.player.coins += constants.POOP_VALUE
-                    self._play_tutorial_sfx("coin")
-            self.tutorial_wait += tdt
-            if self.tutorial_wait > 0.7:
+                    self.sound_manager.play("coin")
+            self.tutorial_wait += dt
+            if self.tutorial_wait > 1.2:
                 self.tutorial_wait = 0.0
                 self.tutorial_step += 1
         elif action == "done":
-            # Outro ekranı yok, direkt oyunu başlat
-            self.tutorial_active = False
-            self.sound_manager.stop_music()
-            self.reset_game()
-            self.sound_manager.start_music()
-
-    def _skip_tutorial(self):
-        if not self.tutorial_active:
-            return
-        self.tutorial_active = False
-        self.sound_manager.stop_music()
-        self.reset_game()
-        if not self._web_fast_mode:
-            self.sound_manager.start_music()
-        self._held_keys.discard(pygame.K_SPACE)
-        self._held_keys.discard(pygame.K_RETURN)
-        self._held_keys.discard(pygame.K_ESCAPE)
-
-    def _continue_from_instructions(self):
-        self.show_instructions = False
-        self.reset_game()
-        self.tutorial_active = True
-        self._held_keys.discard(pygame.K_SPACE)
-        self._held_keys.discard(pygame.K_RETURN)
-        self._held_keys.discard(pygame.K_ESCAPE)
-
-    def _start_tutorial_demo(self):
-        if getattr(self, "tutorial_phase", "playing") != "intro":
-            return
-        self.tutorial_phase = "playing"
-        self.tutorial_step = 0
-        self.tutorial_wait = 0.0
-        self.tutorial_feed_count = 0
-        self.reset_game()
-        if not self._web_fast_mode:
-            self.sound_manager.start_music()
-        self._held_keys.discard(pygame.K_SPACE)
-        self._held_keys.discard(pygame.K_RETURN)
-
-    def _play_tutorial_sfx(self, sound_name):
-        # Web'de tutorial'da sesleri kapatıp frame spike'larını azalt.
-        if self._tutorial_ultra_mode:
-            return
-        self.sound_manager.play(sound_name)
-
-    def _draw_tutorial_scene(self):
-        """Tutorial için ultra-hafif render yolu (Edge/Web)."""
-        if self._bg_cache is None:
-            self._build_bg_cache()
-        self.screen.blit(self._bg_cache, (0, 0))
-
-        shop_spr = self.sprites.get('shop_stall')
-        if shop_spr:
-            self.screen.blit(shop_spr, (constants.STORAGE_X - 80, constants.STORAGE_Y - 80))
-
-        trash_spr = self.sprites.get('trash')
-        if trash_spr:
-            self.screen.blit(trash_spr, (constants.TRASH_X - 40, constants.TRASH_Y - 40))
-
-        # Crop.draw() içindeki ölçekleme maliyetinden kaçın.
-        for crop in self.crops:
-            if crop.state == CropState.MATURE:
-                pygame.draw.circle(self.screen, (255, 145, 30), (int(crop.x), int(crop.y)), 11)
-                pygame.draw.circle(self.screen, (20, 120, 20), (int(crop.x), int(crop.y - 8)), 5)
-            else:
-                pygame.draw.circle(self.screen, (50, 170, 70), (int(crop.x), int(crop.y)), 6)
-
-        # Ağaçlar için sade render.
-        for tree in self.apple_trees:
-            pygame.draw.rect(self.screen, (100, 70, 40), (int(tree.x - 4), int(tree.y - 8), 8, 22))
-            pygame.draw.circle(self.screen, (70, 145, 70), (int(tree.x), int(tree.y - 12)), 20)
-
-        for poop in self.poops:
-            pygame.draw.circle(self.screen, (100, 70, 20), (int(poop.x), int(poop.y)), 12)
-
-        horse_spr = self.sprites.get('horse')
-        if horse_spr:
-            for horse in self.horses:
-                self.screen.blit(horse_spr, (int(horse.x - 90), int(horse.y - 55)))
-
-        self.player.draw(self.screen, self.sprites)
-        # Oyuncunun konumu net görünsün.
-        pygame.draw.circle(self.screen, (255, 240, 120), (int(self.player.x), int(self.player.y)), 16, 2)
+            self.tutorial_phase = "outro"
 
     def _draw_focus_screen(self):
         self.screen.fill((20, 20, 35))
@@ -774,24 +652,18 @@ class Game:
         box_h = 70
         box_x = 60
         box_y = 20
-        if not hasattr(self, '_tutorial_box_surf'):
-            self._tutorial_box_surf = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
-            self._tutorial_box_surf.fill((20, 20, 30, 220))
-            pygame.draw.rect(self._tutorial_box_surf, (255, 215, 0), (0, 0, box_w, box_h), width=3, border_radius=18)
-        self.screen.blit(self._tutorial_box_surf, (box_x, box_y))
+        overlay = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        overlay.fill((20, 20, 30, 220))
+        pygame.draw.rect(overlay, (255, 215, 0), (0, 0, box_w, box_h), width=3, border_radius=18)
+        self.screen.blit(overlay, (box_x, box_y))
         surf = self.font_small.render(msg, True, (255, 255, 255))
         self.screen.blit(surf, (box_x + 18, box_y + 14))
+        # Para bilgisi
         coin_text = self.font_small.render(f"Para: {self.player.coins}", True, (255, 255, 100))
         self.screen.blit(coin_text, (box_x + box_w - 160, box_y + 14))
-        # "Demo'yu Atla" butonu - her zaman görünür
-        skip_rect = pygame.Rect(box_x + box_w - 170, box_y + box_h + 8, 160, 36)
-        pygame.draw.rect(self.screen, (180, 60, 60), skip_rect, border_radius=10)
-        pygame.draw.rect(self.screen, (255, 255, 255), skip_rect, width=2, border_radius=10)
-        skip_text = self.font_small.render("⏭ DEMOYU ATLA", True, (255, 255, 255))
-        self.screen.blit(skip_text, skip_text.get_rect(center=skip_rect.center))
-        # Cache the skip rect for click detection
-        self._tutorial_skip_rect = skip_rect
-
+        # DEMO etiketi
+        tag = self.font_small.render("DEMO", True, (255, 100, 100))
+        self.screen.blit(tag, (box_x + box_w - 80, box_y + box_h - 28))
     def _draw_instructions(self):
         # Gelişmiş talimat ekranı, otomatik satır kaydırma ve scroll ile
         import textwrap
@@ -1053,7 +925,7 @@ class Game:
         vk = self.virtual_keys
         
         class ManualKeys:
-            # _held_keys + virtual_keys birleştirici
+            \"\"\"_held_keys + virtual_keys birleştirici\"\"\"
             def __getitem__(self, key):
                 if key == pygame.K_UP and vk.get('up'): return True
                 if key == pygame.K_DOWN and vk.get('down'): return True
@@ -1068,8 +940,7 @@ class Game:
                                    pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT)):
             self.step_timer -= dt
             if self.step_timer <= 0:
-                if not self._web_fast_mode:
-                    self.sound_manager.play("step")
+                self.sound_manager.play("step")
                 self.step_timer = 0.35
         else:
             self.step_timer = 0.0
@@ -1084,16 +955,13 @@ class Game:
     def _handle_automatic_interactions(self):
         # Determine max capacity
         max_items = self.player.basket_capacity if self.player.basket_timer > 0 else 1
-        p_x = self.player.x
-        p_y = self.player.y
 
         # 1. Auto-Harvest Crops
         for crop in self.crops[:]:
             if len(self.player.items) >= max_items: break
             if crop.state == CropState.MATURE:
-                dx = p_x - crop.x
-                dy = p_y - crop.y
-                if (dx * dx + dy * dy) < (35 * 35):
+                dist = math.sqrt((self.player.x - crop.x)**2 + (self.player.y - crop.y)**2)
+                if dist < 35:
                     self.crops.remove(crop)
                     item_type = "CARROT" if crop.type == FoodType.CARROT else "WHEAT"
                     self.player.items.append(item_type)
@@ -1102,9 +970,8 @@ class Game:
         for tree in self.apple_trees[:]:
             if len(self.player.items) >= max_items: break
             if tree.state == "READY" and tree.apples_left > 0:
-                dx = p_x - tree.x
-                dy = p_y - tree.y
-                if (dx * dx + dy * dy) < (50 * 50):
+                dist = math.sqrt((self.player.x - tree.x)**2 + (self.player.y - tree.y)**2)
+                if dist < 50:
                     tree.harvest()
                     self.player.items.append("APPLE")
                     if tree.apples_left == 0:
@@ -1113,23 +980,21 @@ class Game:
         # 3. Auto-Collect Poop
         for poop in self.poops[:]:
             if len(self.player.items) >= max_items: break
-            dx = p_x - poop.x
-            dy = p_y - poop.y
-            if (dx * dx + dy * dy) < (35 * 35):
+            dist = math.sqrt((self.player.x - poop.x)**2 + (self.player.y - poop.y)**2)
+            if dist < 35:
                 self.poops.remove(poop)
                 self.player.items.append("POOP")
                 self.sound_manager.play("poop_collect")  # Play poop collect sound
         # 4. Auto-Sell Poop
         if "POOP" in self.player.items:
-            if abs(p_x - constants.STORAGE_X) < 80 and abs(p_y - constants.STORAGE_Y) < 80:
+            if abs(self.player.x - constants.STORAGE_X) < 80 and abs(self.player.y - constants.STORAGE_Y) < 80:
                 self.player.coins += constants.POOP_VALUE
                 self.player.items.remove("POOP")
                 self.sound_manager.play("coin")  # Play coin sound
         # 5. Auto-Feed Horses
         for horse in self.horses:
-            dx = p_x - horse.x
-            dy = p_y - horse.y
-            if (dx * dx + dy * dy) < (150 * 150) and horse.state == HorseState.WAITING:
+            dist = math.sqrt((self.player.x - horse.x)**2 + (self.player.y - horse.y)**2)
+            if dist < 150 and horse.state == HorseState.WAITING:
                 for item in self.player.items[:]:
                     f_type = None
                     if item == "CARROT": f_type = FoodType.CARROT
@@ -1141,15 +1006,7 @@ class Game:
                         self._check_horse_finished(horse)
         # ...existing code...
 
-    def _draw(self, present=True, lightweight=False):
-        if lightweight:
-            self._draw_fast_scene()
-            hud = f"SKOR {self.score}  LVL {self.level}  $ {self.player.coins}"
-            self._draw_text(hud, (12, 12), (20, 20, 20), self.font_small)
-            if present:
-                pygame.display.flip()
-            return
-
+    def _draw(self):
         # 0. Cached background (1 blit instead of 80+)
         if self._bg_cache is None:
             self._build_bg_cache()
@@ -1165,14 +1022,13 @@ class Game:
         if trash_spr:
             self.screen.blit(trash_spr, (constants.TRASH_X - 40, constants.TRASH_Y - 40))
             
-        if not lightweight:
-            # Draw Prompts (Dynamic based on proximity)
-            if abs(self.player.x - constants.TRASH_X) < 100 and abs(self.player.y - constants.TRASH_Y) < 100:
-                if self.player.items:
-                    # Position it above the trash bin
-                    text_x = constants.TRASH_X - 40
-                    text_y = constants.TRASH_Y - 100
-                    self._draw_text("[SPACE] Çöpe At", (text_x, text_y), constants.COLOR_WHITE, self.font_small)
+        # Draw Prompts (Dynamic based on proximity)
+        if abs(self.player.x - constants.TRASH_X) < 100 and abs(self.player.y - constants.TRASH_Y) < 100:
+            if self.player.items:
+                # Position it above the trash bin
+                text_x = constants.TRASH_X - 40
+                text_y = constants.TRASH_Y - 100
+                self._draw_text("[SPACE] Çöpe At", (text_x, text_y), constants.COLOR_WHITE, self.font_small)
         
         # 4. Entities
         for crop in self.crops: crop.draw(self.screen, self.sprites)
@@ -1181,111 +1037,82 @@ class Game:
         for horse in self.horses: horse.draw(self.screen, self.sprites)
         self.player.draw(self.screen, self.sprites)
         
-        if not lightweight:
-            # 5. UI (Compact Top Center)
-            ui_y = constants.UI_BASE_Y
-            self._draw_stat_box(constants.SCREEN_WIDTH // 2 - 110, ui_y, str(self.score), "SKOR", (255, 200, 50))
-            self._draw_stat_box(constants.SCREEN_WIDTH // 2, ui_y, str(self.level), "LEVEL", (80, 200, 255))
-            self._draw_stat_box(constants.SCREEN_WIDTH // 2 + 110, ui_y, str(self.player.coins), "PARA", (255, 255, 100))
-
-            # Bottom UI (inventory)
-            seed_text = f"TOHUM: {self.player.carrot_seeds}"
-            self._draw_text(seed_text, (20, constants.SCREEN_HEIGHT - 40), constants.COLOR_BLACK, self.font_small)
-
-            if self.level >= 2:
-                sap_text = f"FİDAN: {self.player.apple_saplings}"
-                self._draw_text(sap_text, (150, constants.SCREEN_HEIGHT - 40), constants.COLOR_BLACK, self.font_small)
-
-            if self.level >= 4:
-                wheat_text = f"BUĞDAY: {self.player.wheat_seeds}"
-                self._draw_text(wheat_text, (280, constants.SCREEN_HEIGHT - 40), constants.COLOR_BLACK, self.font_small)
-
-            if self.level_up_timer > 0:
-                msg = f"LEVEL {self.level}!"
-                surf = self.font_large.render(msg, True, (255, 100, 0))
-                rect = surf.get_rect(center=(constants.SCREEN_WIDTH//2, constants.SCREEN_HEIGHT//2))
-                # Shadow
-                self.screen.blit(self.font_large.render(msg, True, (0,0,0)), rect.move(3,3))
-                self.screen.blit(surf, rect)
-
-            if self.notification_timer > 0:
-                msg = self.notification_msg
-                notif_w, notif_h = 550, 60
-                # Cache notification background
-                if self._notif_bg_cache is None:
-                    self._notif_bg_cache = pygame.Surface((notif_w, notif_h), pygame.SRCALPHA)
-                    pygame.draw.rect(self._notif_bg_cache, (20, 20, 30, 230), (0, 0, notif_w, notif_h), border_radius=15)
-
-                notif_x = (constants.SCREEN_WIDTH - notif_w) // 2
-                notif_y = 150
-                self.screen.blit(self._notif_bg_cache, (notif_x, notif_y))
-                pygame.draw.rect(self.screen, (255, 215, 0), (notif_x, notif_y, notif_w, notif_h), width=3, border_radius=15)
-
-                self._draw_text(msg, (notif_x + (notif_w - self.font_small.size(msg)[0]) // 2 + 2,
-                                      notif_y + (notif_h - self.font_small.get_height()) // 2 + 2),
-                               (0, 0, 0), self.font_small)
-                self._draw_text(msg, (notif_x + (notif_w - self.font_small.size(msg)[0]) // 2,
-                                      notif_y + (notif_h - self.font_small.get_height()) // 2),
-                               (255, 255, 255), self.font_small)
-
-            # 6. Active Power-ups (Timers) - Top Center below Level
-            timer_y = 115
-            if self.player.speed_boost_timer > 0:
-                msg = f"HIZ: {int(self.player.speed_boost_timer)}s"
-                self._draw_centered_text(msg, timer_y, (255, 100, 0), self.font_small)
-                timer_y += 25
-            if self.player.basket_timer > 0:
-                msg = f"SEPET: {int(self.player.basket_timer)}s"
-                self._draw_centered_text(msg, timer_y, (0, 255, 100), self.font_small)
-
-            # Müzik ve restart UI ipuçları
-            music_icon = "♫ ON" if self.sound_manager.music_playing else "♫ OFF"
-            music_color = (100, 255, 100) if self.sound_manager.music_playing else (255, 100, 100)
-            self._draw_text(f"[M] {music_icon}", (10, 10), music_color, self.font_small)
-            self._draw_text("[R] Yeniden Başlat", (10, 35), (180, 180, 180), self.font_small)
-
-            # Version tag
-            self._draw_text(self.version, (constants.SCREEN_WIDTH - 60, constants.SCREEN_HEIGHT - 30), (100, 100, 100), self.font_small)
-
-            if self.game_over:
-                self._draw_game_over()
-            elif self.shop_open:
-                self._draw_shop_popup()
-        if not lightweight:
-            self._draw_interaction_prompts()
-
-            # 8. On-screen D-pad and action buttons
-            self._draw_onscreen_buttons()
+        # 5. UI (Compact Top Center)
+        ui_y = constants.UI_BASE_Y
+        self._draw_stat_box(constants.SCREEN_WIDTH // 2 - 110, ui_y, str(self.score), "SKOR", (255, 200, 50))
+        self._draw_stat_box(constants.SCREEN_WIDTH // 2, ui_y, str(self.level), "LEVEL", (80, 200, 255))
+        self._draw_stat_box(constants.SCREEN_WIDTH // 2 + 110, ui_y, str(self.player.coins), "PARA", (255, 255, 100))
         
-        if present:
-            pygame.display.flip()
+        # Bottom UI (inventory)
+        seed_text = f"TOHUM: {self.player.carrot_seeds}"
+        self._draw_text(seed_text, (20, constants.SCREEN_HEIGHT - 40), constants.COLOR_BLACK, self.font_small)
 
-    def _draw_fast_scene(self):
-        """Gameplay için ultra-hafif render yolu (Web fast mode)."""
-        if self._bg_cache is None:
-            self._build_bg_cache()
-        self.screen.blit(self._bg_cache, (0, 0))
+        if self.level >= 2:
+            sap_text = f"FİDAN: {self.player.apple_saplings}"
+            self._draw_text(sap_text, (150, constants.SCREEN_HEIGHT - 40), constants.COLOR_BLACK, self.font_small)
 
-        for crop in self.crops:
-            if crop.state == CropState.MATURE:
-                pygame.draw.circle(self.screen, (255, 145, 30), (int(crop.x), int(crop.y)), 9)
-            else:
-                pygame.draw.circle(self.screen, (60, 170, 70), (int(crop.x), int(crop.y)), 5)
+        if self.level >= 4:
+            wheat_text = f"BUĞDAY: {self.player.wheat_seeds}"
+            self._draw_text(wheat_text, (280, constants.SCREEN_HEIGHT - 40), constants.COLOR_BLACK, self.font_small)
 
-        for tree in self.apple_trees:
-            pygame.draw.rect(self.screen, (95, 70, 45), (int(tree.x - 3), int(tree.y - 7), 6, 18))
-            pygame.draw.circle(self.screen, (70, 145, 70), (int(tree.x), int(tree.y - 10)), 16)
+        if self.level_up_timer > 0:
+            msg = f"LEVEL {self.level}!"
+            surf = self.font_large.render(msg, True, (255, 100, 0))
+            rect = surf.get_rect(center=(constants.SCREEN_WIDTH//2, constants.SCREEN_HEIGHT//2))
+            # Shadow
+            self.screen.blit(self.font_large.render(msg, True, (0,0,0)), rect.move(3,3))
+            self.screen.blit(surf, rect)
 
-        for poop in self.poops:
-            pygame.draw.circle(self.screen, (100, 70, 20), (int(poop.x), int(poop.y)), 10)
+        if self.notification_timer > 0:
+            msg = self.notification_msg
+            notif_w, notif_h = 550, 60
+            # Cache notification background
+            if self._notif_bg_cache is None:
+                self._notif_bg_cache = pygame.Surface((notif_w, notif_h), pygame.SRCALPHA)
+                pygame.draw.rect(self._notif_bg_cache, (20, 20, 30, 230), (0, 0, notif_w, notif_h), border_radius=15)
+            
+            notif_x = (constants.SCREEN_WIDTH - notif_w) // 2
+            notif_y = 150
+            self.screen.blit(self._notif_bg_cache, (notif_x, notif_y))
+            pygame.draw.rect(self.screen, (255, 215, 0), (notif_x, notif_y, notif_w, notif_h), width=3, border_radius=15)
+            
+            self._draw_text(msg, (notif_x + (notif_w - self.font_small.size(msg)[0]) // 2 + 2,
+                                  notif_y + (notif_h - self.font_small.get_height()) // 2 + 2),
+                           (0, 0, 0), self.font_small)
+            self._draw_text(msg, (notif_x + (notif_w - self.font_small.size(msg)[0]) // 2,
+                                  notif_y + (notif_h - self.font_small.get_height()) // 2),
+                           (255, 255, 255), self.font_small)
 
-        horse_spr = self.sprites.get('horse')
-        if horse_spr:
-            for horse in self.horses:
-                self.screen.blit(horse_spr, (int(horse.x - 90), int(horse.y - 55)))
+        # 6. Active Power-ups (Timers) - Top Center below Level
+        timer_y = 115
+        if self.player.speed_boost_timer > 0:
+            msg = f"HIZ: {int(self.player.speed_boost_timer)}s"
+            self._draw_centered_text(msg, timer_y, (255, 100, 0), self.font_small)
+            timer_y += 25
+        if self.player.basket_timer > 0:
+            msg = f"SEPET: {int(self.player.basket_timer)}s"
+            self._draw_centered_text(msg, timer_y, (0, 255, 100), self.font_small)
 
-        self.player.draw(self.screen, self.sprites)
-        pygame.draw.circle(self.screen, (255, 240, 120), (int(self.player.x), int(self.player.y)), 14, 2)
+        # Müzik ve restart UI ipuçları
+        music_icon = "♫ ON" if self.sound_manager.music_playing else "♫ OFF"
+        music_color = (100, 255, 100) if self.sound_manager.music_playing else (255, 100, 100)
+        self._draw_text(f"[M] {music_icon}", (10, 10), music_color, self.font_small)
+        self._draw_text("[R] Yeniden Başlat", (10, 35), (180, 180, 180), self.font_small)
+
+        # Version tag
+        self._draw_text(self.version, (constants.SCREEN_WIDTH - 60, constants.SCREEN_HEIGHT - 30), (100, 100, 100), self.font_small)
+
+        if self.game_over:
+            self._draw_game_over()
+        elif self.shop_open:
+            self._draw_shop_popup()
+            
+        self._draw_interaction_prompts()
+        
+        # 8. On-screen D-pad and action buttons
+        self._draw_onscreen_buttons()
+        
+        pygame.display.flip()
 
     def _draw_game_over(self):
         w, h = 600, 300
@@ -1300,7 +1127,7 @@ class Game:
         
         self._draw_centered_text("OYUN BİTTİ", overlay_y + 60, (255, 50, 50), self.font_large)
         self._draw_centered_text(f"Toplam Skor: {self.score}", overlay_y + 130, (255, 255, 255), self.font_small)
-        self._draw_centered_text("Yeniden Başlamak İçin TIKLA", overlay_y + 200, (200, 200, 200), self.font_small)
+        self._draw_centered_text("Yeniden Başlamak İçin SPACE/Tıkla", overlay_y + 200, (200, 200, 200), self.font_small)
 
     def _draw_stat_box(self, x, y, val, title, color):
         width, height = constants.BOX_WIDTH, constants.BOX_HEIGHT
@@ -1434,20 +1261,11 @@ class Game:
             pygame.draw.line(self.screen, (255, 255, 100, 80), (tx, ty - 5), (tx, ty + 5), 1)
 
     def _draw_text(self, text, pos, color, font):
-        # Cache'li text render: Edge/Web'de frame dropları ciddi azalır.
-        cache_key = (text, color, id(font))
-        surf = self._font_cache.get(cache_key)
-        if surf is None:
-            if isinstance(color, tuple) and len(color) == 4:  # RGBA support
-                surf = font.render(text, True, color[:3])
-                surf.set_alpha(color[3])
-            else:
-                surf = font.render(text, True, color)
-
-            if len(self._font_cache) > 250:
-                self._font_cache.clear()
-            self._font_cache[cache_key] = surf
-
+        if isinstance(color, tuple) and len(color) == 4: # RGBA support for some calls
+            surf = font.render(text, True, color[:3])
+            surf.set_alpha(color[3])
+        else:
+            surf = font.render(text, True, color)
         self.screen.blit(surf, pos)
 
 async def main():
