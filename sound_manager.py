@@ -194,8 +194,8 @@ class SoundManager:
         self._bg_channel = None
         self._bg_sound = None
         self._bg_volume = 0.18 if IS_WEB else 0.14
-        # Keep background music enabled on web, but quieter to reduce artifacts.
-        self._bg_music_enabled = True
+        # Web background music is disabled to avoid persistent crackle/pop artifacts.
+        self._bg_music_enabled = not IS_WEB
         self.music_enabled = True
         self._audio_unlocked = not IS_WEB
         self._pending_music = IS_WEB and self._bg_music_enabled
@@ -298,11 +298,11 @@ class SoundManager:
         self._pending_music = False
 
     def toggle_music(self):
+        self.music_enabled = not self.music_enabled
         if not self._bg_music_enabled:
             self.music_playing = False
             self._pending_music = False
             return
-        self.music_enabled = not self.music_enabled
         if not self.music_enabled:
             self.stop_music()
             return
