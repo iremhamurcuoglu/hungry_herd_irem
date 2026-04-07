@@ -179,6 +179,9 @@ class SoundManager:
         self._bg_channel = None
         self._bg_sound = None
         self._bg_volume = 0.14
+        # Web audio pipeline is prone to crackle/pop on long looping procedural tracks.
+        # Keep SFX enabled, but disable background music there for stability.
+        self._bg_music_enabled = not IS_WEB
         self._audio_unlocked = not IS_WEB
         self._pending_music = False
 
@@ -248,6 +251,10 @@ class SoundManager:
             pass
 
     def start_music(self):
+        if not self._bg_music_enabled:
+            self.music_playing = False
+            self._pending_music = False
+            return
         if not self.enabled or not self._bg_channel:
             return
         if not self._audio_unlocked:
@@ -272,6 +279,10 @@ class SoundManager:
         self._pending_music = False
 
     def toggle_music(self):
+        if not self._bg_music_enabled:
+            self.music_playing = False
+            self._pending_music = False
+            return
         if self.music_playing:
             self.stop_music()
         else:
