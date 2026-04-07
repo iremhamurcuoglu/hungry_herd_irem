@@ -24,6 +24,8 @@ class Game:
         self.version = "v1.4.0"
         self.game_state = "PLAYING"
         self.mixer_initialized = False # We stay silent
+        self._music_retry_timer = 0.0
+        self._music_toggle_rect = None
 
         # Instruction ekranı kontrolü
         self.show_instructions = True
@@ -144,6 +146,11 @@ class Game:
         while True:
             dt = self.clock.tick(60) / 1000.0
             self._handle_events()
+            self._music_retry_timer -= dt
+            if self._music_retry_timer <= 0:
+                if getattr(self.sound_manager, "_audio_unlocked", False) and not self.sound_manager.music_playing:
+                    self.sound_manager.start_music()
+                self._music_retry_timer = 1.0
             if self.show_instructions:
                 self._draw_instructions()
             elif self.tutorial_active:
@@ -173,6 +180,11 @@ class Game:
                 self.sound_manager.unlock_audio()
                 if not self.sound_manager.music_playing:
                     self.sound_manager.start_music()
+
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if self._music_toggle_rect and self._music_toggle_rect.collidepoint(event.pos):
+                    self.sound_manager.toggle_music()
+                    continue
 
             if self.show_instructions:
                 if event.type == pygame.KEYDOWN:
@@ -854,6 +866,7 @@ class Game:
         music_icon = "♫ ON" if self.sound_manager.music_playing else "♫ OFF"
         music_color = (100, 255, 100) if self.sound_manager.music_playing else (255, 100, 100)
         self._draw_text(f"[M] {music_icon}", (10, 10), music_color, self.font_small)
+        self._music_toggle_rect = pygame.Rect(8, 8, 130, 24)
         self._draw_text("[R] Yeniden Başlat", (10, 35), (180, 180, 180), self.font_small)
 
         # Version tag
