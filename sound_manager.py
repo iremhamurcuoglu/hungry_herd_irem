@@ -137,6 +137,39 @@ _MUSIC_NOTES = [
 ]
 
 
+def _ambient_music_loop(dur=6.0, vol=0.06):
+    """Generate a softer ambient loop with fewer transients than note-by-note melody."""
+    n = int(_MIX_FREQ * dur)
+    out = []
+    chords = [
+        (C4, E4, G4),
+        (A4 * 0.5, C4, E4),
+        (F4, A4 * 0.5, C4),
+        (G4 * 0.5, B4 * 0.5, D4),
+    ]
+    chord_len = max(1, n // len(chords))
+    peak = int(vol * 32767)
+    prev_sample = 0.0
+    for i in range(n):
+        chord = chords[min(len(chords) - 1, i // chord_len)]
+        chord_pos = i % chord_len
+        chord_mix = 0.0
+        for idx, freq in enumerate(chord):
+            phase = 2.0 * math.pi * freq * i / _MIX_FREQ
+            weight = 0.55 if idx == 0 else 0.28
+            chord_mix += math.sin(phase) * weight
+        slow_lfo = 0.82 + 0.18 * math.sin((2.0 * math.pi * i) / n)
+        edge_fade = min(1.0, chord_pos / max(1, int(_MIX_FREQ * 0.08)))
+        tail_fade = min(1.0, (chord_len - chord_pos) / max(1, int(_MIX_FREQ * 0.08)))
+        env = min(edge_fade, tail_fade) * slow_lfo
+        raw_sample = chord_mix * env * peak
+        smoothed = (raw_sample * 0.18) + (prev_sample * 0.82)
+        prev_sample = smoothed
+        out.append(max(-32767, min(32767, int(smoothed))))
+    _blend_loop_edge(out, fade_len=min(2048, max(256, len(out) // 8)))
+    return _make_sound(out)
+
+
 class SoundManager:
     def __init__(self):
         global _MIX_FREQ, _MIX_CHANNELS
@@ -200,7 +233,7 @@ class SoundManager:
         """Lazy-generate background music."""
         if self._bg_sound is None:
             try:
-                self._bg_sound = _melody(_MUSIC_NOTES, nd=0.22, vol=0.075, loop_safe=True)
+                self._bg_sound = _ambient_music_loop(dur=6.0, vol=0.05)
             except Exception as e:
                 print(f"Music gen error: {e}")
 
